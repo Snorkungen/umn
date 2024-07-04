@@ -223,10 +223,70 @@ typedef struct MN_Token
     } value;
 } MN_Token;
 
-MN_Token *mn_commit(MArena *arenaptr, size_t token_type, char *buffer)
+/* convert 0b11 => 3  */
+long long mn_bintoll(char *s)
+{
+    long long result = 0;
+    /* the strategy is to go to the end and walk backwards */
+
+    size_t i = 0, length = strlen(s);
+
+    if (length > 2 && '0' == s[0] && 'b' == tolower(s[1]))
+    {
+        length -= 2;
+        s += 2;
+    }
+
+    for (i = 0; (length - i) > 0; i++)
+    {
+        if ('1' == s[length - i - 1])
+        {
+            result |= (1 << i);
+        }
+    }
+
+    return result;
+}
+
+long long mn_hextoll(char *s)
+{
+    long long result = 0;
+
+    size_t i = 0, length = strlen(s);
+
+    if (length > 2 && '0' == s[0] && 'x' == tolower(s[1]))
+    {
+        length -= 2;
+        s += 2;
+    }
+
+    for (i = 0; (length - i) > 0; i++)
+    {
+        long long c = toupper(s[length - i - 1]);
+
+        if (isdigit(c))
+        {
+            c -= 48;
+        }
+        else if (c >= 'A' && c <= 'F')
+        {
+            c = c - (65) + 10;
+        }
+        else
+        {
+            c = 0;
+        }
+
+        result |= (c << (4 * i));
+    }
+
+    return result;
+}
+
+MN_Token *mn_create_token(MArena *arenaptr, size_t token_type, char *buffer)
 {
     size_t length = strlen(buffer);
-
+    printf("%s\n", buffer);
     /* TODO do some sanity checks that the information given are valid*/
 
     MN_Token *t = marena_alloc(arenaptr, sizeof(MN_Token));
@@ -238,15 +298,44 @@ MN_Token *mn_commit(MArena *arenaptr, size_t token_type, char *buffer)
     }
     else if (token_type & MNTT_INT)
     {
-        if ('0' == buffer[0])
+        int modifier;
+        if ('-' == buffer[0] & length > 1)
         {
-            perror("not implemented: converting string to integer 0xaa etc..");
+            buffer += 1;
+            modifier = -1;
+        }
+        else if ('+' == buffer[0] & length > 1)
+        {
+            buffer += 1;
+            modifier = 1;
+        }
+        else
+        {
+            modifier = 1;
+        }
+
+        // printf("%s", buffer);
+
+        if ('0' == buffer[0] & length > 2)
+        {
+            if ('b' == tolower(buffer[1]))
+            {
+                t->value.i = mn_bintoll(buffer);
+            }
+            else if ('x' == tolower(buffer[1]))
+            {
+                t->value.i = mn_hextoll(buffer);
+            }
+
             /* value is started by zero be smarter about parsing whatever the value could be */
         }
         else
         {
-            t->value.i = atoi(buffer);
+            t->value.i = atoll(buffer);
         }
+
+        /* make the number negative if that has been specified*/
+        t->value.i *= modifier;
     }
     else if (token_type & MNTT_FLOAT)
     {
@@ -257,9 +346,26 @@ MN_Token *mn_commit(MArena *arenaptr, size_t token_type, char *buffer)
 
     return t;
 }
+/* create a token and add to the linked-list of tokens */
+void mn_commit(MArena *arenaptr, MN_Token **head, MN_Token **token, size_t token_type, char *buffer)
+{
+    MN_Token *t = mn_create_token(arenaptr, token_type, buffer);
+    if (*head == NULL)
+    {
+        *head = t;
+        *token = *head;
+    }
+    else
+    {
+        t->prev = *token;
+        (*token)->next = t;
+        *token = t;
+    }
+}
 
 MN_Token *mn_parse(MArena *arenaptr, char *input)
 {
+
     /* or should this be an array where then the values are, lets se how cumbersome it becomes to traverse the linke-list */
     MN_Token *head = NULL, *token = head;
 
@@ -286,18 +392,8 @@ MN_Token *mn_parse(MArena *arenaptr, char *input)
 
             /* commit the current token type and buffer into the stuff */
             // TODO: create token and commit
-            MN_Token *t = mn_commit(arenaptr, token_type, buffer);
-            if (head == NULL)
-            {
-                head = t;
-                token = head;
-            }
-            else
-            {
-                t->prev = token;
-                token->next = t;
-                token = t;
-            }
+            MN_Token *t = mn_create_token(arenaptr, token_type, buffer);
+            mn_commit(arenaptr, &head, &token, token_type, buffer);
 
             /* reset state */
             token_type = 0;
@@ -334,25 +430,17 @@ MN_Token *mn_parse(MArena *arenaptr, char *input)
                 buffer[bindex++] = c;
                 token_type = (token_type | MNTT_FLOAT) ^ MNTT_INT; /* set the token type to a numeric float */
             }
-            else if (token_type & MNTT_INT && '0' == buffer[0] && isdigit(input[i /* index was incremented already */]) && ('b' == tolower(c) || 'x' == tolower(c)))
-            /* leave room for checking 0x 0X 04324 0b 0B */
+            else if (token_type & MNTT_INT && '0' == buffer[0] && bindex == 1 && isxdigit(input[i /* index was incremented already */]) && ('b' == tolower(c) || 'x' == tolower(c)))
             {
+                /* leave room for checking 0x 0X 04324 0b 0B */
                 buffer[bindex++] = c;
+            }
+            else if (tolower(buffer[1]) == 'x' && isxdigit(c)){
+                buffer[bindex++] = c; /* support hex numbers */
             }
             else
             {
-                MN_Token *t = mn_commit(arenaptr, token_type, buffer);
-                if (head == NULL)
-                {
-                    head = t;
-                    token = head;
-                }
-                else
-                {
-                    t->prev = token;
-                    token->next = t;
-                    token = t;
-                }
+                mn_commit(arenaptr, &head, &token, token_type, buffer);
 
                 /* reset state */
                 token_type = MNTT_IDENT;
@@ -378,18 +466,7 @@ MN_Token *mn_parse(MArena *arenaptr, char *input)
 
     if (token_type != 0)
     {
-        MN_Token *t = mn_commit(arenaptr, token_type, buffer);
-        if (head == NULL)
-        {
-            head = t;
-            token = head;
-        }
-        else
-        {
-            t->prev = token;
-            token->next = t;
-            token = t;
-        }
+        mn_commit(arenaptr, &head, &token, token_type, buffer);
     }
 
     return head;
