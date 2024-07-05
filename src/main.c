@@ -583,6 +583,16 @@ int main(int argc, char **argv)
         TODO: add support for configuring the output
     */
 
+    /* if no flags give but argument give assume the value is a decimal argument */
+    {
+        size_t sum = 0, i = 0;
+        for (i = 0; i < F_UNDEFINED; i++)
+            sum += (size_t)fvalues[i];
+
+        if (argc > 1 && sum == 0)
+            fvalues[F_DECIMAL] = &(AP_FlagValue){0, 0, argv[1]};
+    }
+
     if (fvalues[F_DECIMAL] != NULL)
     {
         fvalue = fvalues[F_DECIMAL];
