@@ -32,8 +32,8 @@ void *marena_alloc(MArena *arenaptr, size_t size_in_bytes);
 
 typedef struct
 {
-    char alias;
     char *name;
+    char alias;
 } AP_FlagName;
 
 typedef struct AP_FlagValue
@@ -62,7 +62,7 @@ AP_FlagValue **ap_read(MArena *arenaptr, size_t argc, char **argv, size_t fcount
     char *arg;
     char *fname;
     size_t fidx;
-    AP_FlagValue **values = marena_alloc(arenaptr, sizeof(AP_FlagValue) * (fcount + 1));
+    AP_FlagValue **values = marena_alloc(arenaptr, sizeof(AP_FlagValue) * (fcount + 1)); /* leave room for one extra value where unknown flags are dumped */
 
     for (size_t i = 1; i < argc; i++)
     {
@@ -78,13 +78,11 @@ AP_FlagValue **ap_read(MArena *arenaptr, size_t argc, char **argv, size_t fcount
         fname = arg[1] == '-' ? (arg + 2) : (arg + 1);
 
         /* determine the index for the flag*/
-        fidx = 0;
-        for (; fidx < fcount; fidx++)
+        for (fidx = 0; fidx < fcount; fidx++)
         {
-            if (
-                (strlen(fname) == 1 && fname[0] == options[fidx].alias) || strcmp(fname, options[fidx].name))
+            if ((strlen(fname) == 1 && fname[0] == options[fidx].alias) || strcmp(fname, options[fidx].name) == 0)
             {
-                break; /* a location found exiting loop */
+                break; /* a location found leaving loop */
             }
         }
 
@@ -515,51 +513,141 @@ MN_Token *mn_parse(MArena *arenaptr, char *input)
     return head;
 }
 
+/* convert number to string 7 => 0b111 */
+char *lltobstr(MArena *arenaptr, long long n)
+{
+    char *s = marena_alloc(arenaptr, 3 + sizeof(n) * 8 + 1);
+
+    size_t offset = 0, i = 0;
+
+    /* treat values as unsigned where, so that -1 => -0b1 */
+    if (n < 0)
+    {
+        s[i++] = '-';
+        n *= -1; /* make num positive if the number was negative*/
+    }
+
+    /* write "0b" to the string*/
+    s[i++] = '0';
+    s[i++] = 'b'; /* could have switch that toggles 'B' */
+
+    /* find the first byte with values */
+
+    /* move offset until finds first byte with data */
+    for (offset = 0; (n & ((0xffULL << 7 * 8)) >> ((offset) * 8)) == 0; offset++)
+    {
+        ; /* noop the above statement does some cursed B.S. */
+    }
+
+    offset = offset * 8; /* make a bit offset now */
+
+    /* move offset untill it finds its first byte with a 1*/
+    while (offset <= sizeof(n) * 8)
+    {
+        if (n & (1 << (sizeof(n) * 8 - (++offset))))
+        {
+            break;
+        }
+    }
+
+    while (offset <= sizeof(n) * 8)
+    {
+        s[i++] = n & (1 << (sizeof(n) * 8 - offset++)) ? '1' : '0';
+    }
+
+    return s;
+}
+
 int main(int argc, char **argv)
 {
-    void *farena = marena_init();
+    void *arena = marena_init();
+
+    const size_t F_DECIMAL = 0, F_BINARY = 1, F_OCTAL = 2, F_HEX = 3, F_INTERACTIVE = 4, F_UNDEFINED = 5;
 
     AP_FlagName options[] = {
-        {'d', "decimal"},
-        {'x', "hex"},
-        {'o', "octal"},
+        {"decimal", 'd'},
+        {"binary", 'b'},
+        {"octal", 'o'},
+        {"hex", 'x'},
+        {"interactive", 'i'}, /* TODO: add support for interactively entering numbers*/
     };
 
     /* ap read could maybe pass in function is flag, for dealing with "-190" */
-    AP_FlagValue **fvalues = ap_read(farena, argc, argv, 0, NULL);
+    AP_FlagValue **fvalues = ap_read(arena, argc, argv, (5 /* options is a constant */), options);
+    AP_FlagValue *fvalue;
 
-    if (fvalues[0] == NULL)
+    char *s;
+    MN_Token *t;
+
+    /*
+        TODO: add support for configuring the output
+    */
+
+    if (fvalues[F_DECIMAL] != NULL)
     {
-        perror("-x must be given");
-        return 2;
+        fvalue = fvalues[F_DECIMAL];
+        /* NOTE: could seg fault if no value is passed*/
+        if ((s = ap_concat_value(arena, fvalues[F_DECIMAL])) != NULL && (t = mn_parse(arena, s)) != NULL)
+        {
+            if (t->token_type & MNTT_NUMERIC == 0)
+            {
+                printf("\"%s\" = %s\n", s, t->value.s);
+            }
+            else if (t->token_type & MNTT_FLOAT)
+            {
+                printf("\"%s\" = %Lf\n", s, t->value.f); /* this program does not actually support floating point numbers*/
+            }
+            else
+            {
+                printf("\"%s\" = %lld\n", s, t->value.i);
+            }
+        }
     }
 
-    char *value = ap_concat_value(farena, fvalues[0]);
-    if (value == NULL)
+    if (fvalues[F_BINARY] != NULL)
     {
-        perror("-x must be foollowed by a number");
-        return 2;
-    }
-    printf("%s\n", value);
-
-    MN_Token *t = mn_parse(farena, value);
-
-    if (t->token_type & MNTT_INT == 0)
-    {
-        perror("something went wrong");
-        return 2;
+        if ((s = ap_concat_value(arena, fvalues[F_BINARY])) != NULL && (t = mn_parse(arena, s)) != NULL)
+        {
+            if (t->token_type & MNTT_NUMERIC && t->token_type & MNTT_INT)
+            {
+                printf("\"%s\" = %s\n", s, lltobstr(arena, t->value.i));
+            }
+        }
     }
 
-    printf("\"%s\" = %#llx\n", value, t->value.i);
+    if (fvalues[F_OCTAL] != NULL)
+    {
+        if ((s = ap_concat_value(arena, fvalues[F_OCTAL])) != NULL && (t = mn_parse(arena, s)) != NULL)
+        {
+            if (t->token_type & MNTT_NUMERIC && t->token_type & MNTT_INT)
+            {
+                printf("\"%s\" = 0o%llo\n", s, t->value.i);
+            }
+        }
+    }
 
-    /* do the processing of the flags */
+    if (fvalues[F_HEX] != NULL)
+    {
+        if ((s = ap_concat_value(arena, fvalues[F_HEX])) != NULL && (t = mn_parse(arena, s)) != NULL)
+        {
+            if (t->token_type & MNTT_NUMERIC && t->token_type & MNTT_INT)
+            {
+                printf("\"%s\" = %#llx\n", s, t->value.i);
+            }
+        }
+    }
 
-    marena_free(farena);
+    if (fvalues[F_UNDEFINED])
+    {
+        /* handle if given an unknown flag */
+    }
+
+    marena_free(arena);
 
     return 0;
 }
 
-const size_t MARENA_ALLOCATION_SIZE = (1024 * 8); /* ~8kB largest possible allocation is that much*/
+const size_t MARENA_ALLOCATION_SIZE = (1024 * 4); /* ~4kB largest possible allocation is that much*/
 
 /* initialize an arena of memory */
 MArena *marena_init(void)
