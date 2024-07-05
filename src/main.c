@@ -283,10 +283,36 @@ long long mn_hextoll(char *s)
     return result;
 }
 
+/* convert 0o17 => 15 */
+long long mn_octtoll(char *s)
+{
+    long long result = 0;
+
+    size_t i = 0, length = strlen(s);
+    char c;
+
+    if (length > 2 && '0' == s[0] && 'o' == tolower(s[1]))
+    {
+        length -= 2;
+        s += 2;
+    }
+
+    for (i = 0; (length - i) > 0; i++)
+    {
+        c = s[length - i - 1];
+        if (isdigit(c) && c < '8')
+        {
+            result |= ((c - '0') << (3 * i));
+        }
+    }
+
+    return result;
+}
+
 MN_Token *mn_create_token(MArena *arenaptr, size_t token_type, char *buffer)
 {
     size_t length = strlen(buffer);
-    printf("%s\n", buffer);
+
     /* TODO do some sanity checks that the information given are valid*/
 
     MN_Token *t = marena_alloc(arenaptr, sizeof(MN_Token));
@@ -314,20 +340,24 @@ MN_Token *mn_create_token(MArena *arenaptr, size_t token_type, char *buffer)
             modifier = 1;
         }
 
-        // printf("%s", buffer);
-
         if ('0' == buffer[0] & length > 2)
         {
-            if ('b' == tolower(buffer[1]))
-            {
-                t->value.i = mn_bintoll(buffer);
-            }
-            else if ('x' == tolower(buffer[1]))
-            {
-                t->value.i = mn_hextoll(buffer);
-            }
-
             /* value is started by zero be smarter about parsing whatever the value could be */
+
+            switch (tolower(buffer[1]))
+            {
+            case 'b':
+                t->value.i = mn_bintoll(buffer);
+                break;
+            case 'o':
+                t->value.i = mn_octtoll(buffer);
+                break;
+            case 'x':
+                t->value.i = mn_hextoll(buffer);
+                break;
+            default:
+                t->value.i = 0;
+            }
         }
         else
         {
@@ -361,6 +391,22 @@ void mn_commit(MArena *arenaptr, MN_Token **head, MN_Token **token, size_t token
         (*token)->next = t;
         *token = t;
     }
+}
+
+/* logic for checking that the current character is valid for the text representaition of a number */
+/* validate that the character works for the give prefix i.e 0xaaa 0b1111 0o010117 */
+int mn_char_is_valid_for_prefix(char prefix, char c)
+{
+    switch (tolower(prefix))
+    {
+    case 'b':
+        return '0' == c || '1' == c;
+    case 'o':
+        return isdigit(c) && c < '8';
+    case 'x':
+        return isxdigit(c);
+    }
+    return 0;
 }
 
 MN_Token *mn_parse(MArena *arenaptr, char *input)
@@ -421,22 +467,19 @@ MN_Token *mn_parse(MArena *arenaptr, char *input)
                 exit(1);
             }
 
-            if (isdigit(c))
+            /* Validate that the current character works for the numeric type */
+            if (isdigit(c) || (token_type & MNTT_INT && bindex > 1 && '0' == buffer[0] && mn_char_is_valid_for_prefix(buffer[1], c)))
             {
                 buffer[bindex++] = c;
             }
-            else if ('.' == c)
+            else if (token_type & MNTT_INT && '.' == c) /* is a token that informs that the following number is going to be a float */
             {
                 buffer[bindex++] = c;
                 token_type = (token_type | MNTT_FLOAT) ^ MNTT_INT; /* set the token type to a numeric float */
             }
-            else if (token_type & MNTT_INT && '0' == buffer[0] && bindex == 1 && isxdigit(input[i /* index was incremented already */]) && ('b' == tolower(c) || 'x' == tolower(c)))
-            {
-                /* leave room for checking 0x 0X 04324 0b 0B */
+            else if (token_type & MNTT_INT && '0' == buffer[0] && '\0' == buffer[1] && mn_char_is_valid_for_prefix(c, input[i /* index was incremented already */]))
+            { /* check that the current character informs the logic that the following is a non decimal representation of the number */
                 buffer[bindex++] = c;
-            }
-            else if (tolower(buffer[1]) == 'x' && isxdigit(c)){
-                buffer[bindex++] = c; /* support hex numbers */
             }
             else
             {
@@ -477,8 +520,8 @@ int main(int argc, char **argv)
     void *farena = marena_init();
 
     AP_FlagName options[] = {
-        {'x', "hex"},
         {'d', "decimal"},
+        {'x', "hex"},
         {'o', "octal"},
     };
 
