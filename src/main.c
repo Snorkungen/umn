@@ -4,13 +4,6 @@
 #include <string.h>
 #include <ctype.h>
 
-/*
-    TODO: read command line arguments.
-    [X] Arena allocator
-    [ ] read arguments
-        ap_read problem what is this -x -10, are thees to flags or is -10 a value ???
-*/
-
 typedef struct
 {
     size_t length;
@@ -229,7 +222,7 @@ long long mn_bintoll(char *s)
 
     size_t i = 0, length = strlen(s);
 
-    if (length > 2 && '0' == s[0] && 'b' == tolower(s[1]))
+    if (length > 2 && '0' == s[0] && ('b' == s[1] || 'B' == s[1]))
     {
         length -= 2;
         s += 2;
@@ -252,7 +245,7 @@ long long mn_hextoll(char *s)
 
     size_t i = 0, length = strlen(s);
 
-    if (length > 2 && '0' == s[0] && 'x' == tolower(s[1]))
+    if (length > 2 && '0' == s[0] && ('x' == s[1] || 'X' == s[1]))
     {
         length -= 2;
         s += 2;
@@ -260,7 +253,7 @@ long long mn_hextoll(char *s)
 
     for (i = 0; (length - i) > 0; i++)
     {
-        long long c = toupper(s[length - i - 1]);
+        long long c = s[length - i - 1];
 
         if (isdigit(c))
         {
@@ -268,7 +261,11 @@ long long mn_hextoll(char *s)
         }
         else if (c >= 'A' && c <= 'F')
         {
-            c = c - (65) + 10;
+            c = c - ('A') + 10;
+        }
+        else if (c >= 'a' && c <= 'f')
+        {
+            c = c - ('a') + 10;
         }
         else
         {
@@ -289,7 +286,7 @@ long long mn_octtoll(char *s)
     size_t i = 0, length = strlen(s);
     char c;
 
-    if (length > 2 && '0' == s[0] && 'o' == tolower(s[1]))
+    if (length > 2 && '0' == s[0] && ('o' == s[1] || 'O' == s[1]))
     {
         length -= 2;
         s += 2;
@@ -342,14 +339,17 @@ MN_Token *mn_create_token(MArena *arenaptr, size_t token_type, char *buffer)
         {
             /* value is started by zero be smarter about parsing whatever the value could be */
 
-            switch (tolower(buffer[1]))
+            switch (buffer[1])
             {
+            case 'B':
             case 'b':
                 t->value.i = mn_bintoll(buffer);
                 break;
+            case 'O':
             case 'o':
                 t->value.i = mn_octtoll(buffer);
                 break;
+            case 'X':
             case 'x':
                 t->value.i = mn_hextoll(buffer);
                 break;
@@ -395,12 +395,15 @@ void mn_commit(MArena *arenaptr, MN_Token **head, MN_Token **token, size_t token
 /* validate that the character works for the give prefix i.e 0xaaa 0b1111 0o010117 */
 int mn_char_is_valid_for_prefix(char prefix, char c)
 {
-    switch (tolower(prefix))
+    switch (prefix)
     {
+    case 'B':
     case 'b':
         return '0' == c || '1' == c;
+    case 'O':
     case 'o':
         return isdigit(c) && c < '8';
+    case 'X':
     case 'x':
         return isxdigit(c);
     }
