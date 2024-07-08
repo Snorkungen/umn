@@ -57,6 +57,11 @@ AP_FlagValue **ap_read(MArena *arenaptr, size_t argc, char **argv, size_t fcount
     size_t fidx;
     AP_FlagValue **values = marena_alloc(arenaptr, sizeof(AP_FlagValue) * (fcount + 1)); /* leave room for one extra value where unknown flags are dumped */
 
+    if (values == NULL)
+    {
+        return NULL;
+    }
+
     for (size_t i = 1; i < argc; i++)
     {
         arg = argv[i];
@@ -88,7 +93,11 @@ AP_FlagValue **ap_read(MArena *arenaptr, size_t argc, char **argv, size_t fcount
 
         /* create a memory allocation for the value, that is coming */
 
-        AP_FlagValue *fvalue = marena_alloc(arenaptr, sizeof(AP_FlagValue));
+        AP_FlagValue *fvalue;
+        if (fvalue = marena_alloc(arenaptr, sizeof(AP_FlagValue)) == NULL)
+        {
+            return NULL;
+        }
 
         fvalue->tail = fvalue;
         values[fidx] = fvalue;
@@ -119,7 +128,11 @@ AP_FlagValue **ap_read(MArena *arenaptr, size_t argc, char **argv, size_t fcount
 
             if (values[fidx]->tail->value != NULL)
             {
-                fvalue = marena_alloc(arenaptr, sizeof(AP_FlagValue));
+                if (fvalue = marena_alloc(arenaptr, sizeof(AP_FlagValue)) == NULL)
+                {
+                    return values;
+                }
+
                 values[fidx]->tail->next = fvalue;
                 values[fidx]->tail = fvalue;
             }
@@ -164,8 +177,13 @@ char *ap_concat_value(MArena *arenaptr, AP_FlagValue *fvalueptr)
     }
 
     /* 2nd copy the values onto the value buffer */
-    char *value = marena_alloc(arenaptr, length);
+    char *value;
     size_t offset = 0;
+
+    if (value = marena_alloc(arenaptr, length) == NULL)
+    {
+        return NULL;
+    }
 
     fvalue = fvalueptr;
 
@@ -310,11 +328,18 @@ MN_Token *mn_create_token(MArena *arenaptr, size_t token_type, char *buffer)
 
     /* TODO do some sanity checks that the information given are valid*/
 
-    MN_Token *t = marena_alloc(arenaptr, sizeof(MN_Token));
+    MN_Token *t;
+    if (t = marena_alloc(arenaptr, sizeof(MN_Token)) == NULL)
+    {
+        return NULL;
+    }
 
     if (token_type & MNTT_IDENT)
     {
-        t->value.s = marena_alloc(arenaptr, length + 1);
+        if (t->value.s = marena_alloc(arenaptr, length + 1) == NULL)
+        {
+            return NULL;
+        };
         memcpy(t->value.s, buffer, length);
     }
     else if (token_type & MNTT_INT)
@@ -378,6 +403,12 @@ MN_Token *mn_create_token(MArena *arenaptr, size_t token_type, char *buffer)
 void mn_commit(MArena *arenaptr, MN_Token **head, MN_Token **token, size_t token_type, char *buffer)
 {
     MN_Token *t = mn_create_token(arenaptr, token_type, buffer);
+
+    if (t == NULL)
+    {
+        return; /* do nothing if failed to allocate memory*/
+    }
+
     if (*head == NULL)
     {
         *head = t;
@@ -439,7 +470,6 @@ MN_Token *mn_parse(MArena *arenaptr, char *input)
 
             /* commit the current token type and buffer into the stuff */
             // TODO: create token and commit
-            MN_Token *t = mn_create_token(arenaptr, token_type, buffer);
             mn_commit(arenaptr, &head, &token, token_type, buffer);
 
             /* reset state */
@@ -519,7 +549,11 @@ MN_Token *mn_parse(MArena *arenaptr, char *input)
 /* convert number to string 7 => 0b111 */
 char *lltobstr(MArena *arenaptr, long long n)
 {
-    char *s = marena_alloc(arenaptr, 3 + sizeof(n) * 8 + 1);
+    char *s;
+    if (s = marena_alloc(arenaptr, 3 + sizeof(n) * 8 + 1) == NULL)
+    {
+        return NULL;
+    }
 
     size_t offset = 0, i = 0;
 
@@ -547,7 +581,7 @@ char *lltobstr(MArena *arenaptr, long long n)
     /* move offset untill it finds its first byte with a 1*/
     while (offset <= sizeof(n) * 8)
     {
-        if (n & (1 << (sizeof(n) * 8 - (++offset))))
+        if (n & (1ULL << (sizeof(n) * 8 - (++offset))))
         {
             break;
         }
@@ -555,7 +589,7 @@ char *lltobstr(MArena *arenaptr, long long n)
 
     while (offset <= sizeof(n) * 8)
     {
-        s[i++] = n & (1 << (sizeof(n) * 8 - offset++)) ? '1' : '0';
+        s[i++] = n & (1ULL << (sizeof(n) * 8 - offset++)) ? '1' : '0';
     }
 
     return s;
@@ -579,6 +613,12 @@ int main(int argc, char **argv)
     AP_FlagValue **fvalues = ap_read(arena, argc, argv, (5 /* options is a constant */), options);
     AP_FlagValue *fvalue;
 
+    if (fvalues == NULL)
+    {
+        perror("error: not enough memory");
+        exit(1);
+    }
+
     char *s;
     MN_Token *t;
 
@@ -598,11 +638,10 @@ int main(int argc, char **argv)
 
     if (fvalues[F_DECIMAL] != NULL)
     {
-        fvalue = fvalues[F_DECIMAL];
         /* NOTE: could seg fault if no value is passed*/
         if ((s = ap_concat_value(arena, fvalues[F_DECIMAL])) != NULL && (t = mn_parse(arena, s)) != NULL)
         {
-            if (t->token_type & MNTT_NUMERIC == 0)
+            if ((t->token_type & MNTT_NUMERIC) == 0)
             {
                 printf("\"%s\" = %s\n", s, t->value.s);
             }
@@ -623,6 +662,11 @@ int main(int argc, char **argv)
         {
             if (t->token_type & MNTT_NUMERIC && t->token_type & MNTT_INT)
             {
+                char *binstr = lltobstr(arena, t->value.i);
+                if (binstr == NULL)
+                {
+                    binstr = "0b0";
+                }
                 printf("\"%s\" = %s\n", s, lltobstr(arena, t->value.i));
             }
         }
@@ -714,17 +758,22 @@ void *marena_alloc(MArena *arenaptr, size_t size_in_bytes)
     arenaptr = marena_get_active(arenaptr);
 
     /* check that there is enough space to allocate the requested memory*/
-    size_t remaining_bytes = (arenaptr->end - arenaptr->curr);
+    size_t remaining_bytes = ((char *)(arenaptr->end) - (char *)(arenaptr->curr));
     if (remaining_bytes <= size_in_bytes)
     {
         /* assign a new arena chunk */
 
-        if ((size_t)(arenaptr->end - (void *)arenaptr->begin) < size_in_bytes)
+        if ((size_t)(arenaptr->end - (size_t)arenaptr->begin) < size_in_bytes)
         {
             return NULL;
         }
 
         MArena *new_arenaptr = marena_init(); /* TODO: allow specifying the exact amount required, if the default allocation is smaller than needed */
+
+        if (new_arenaptr == NULL)
+        {
+            return NULL;
+        }
 
         arenaptr->next = new_arenaptr;
         arenaptr = arenaptr->next;
