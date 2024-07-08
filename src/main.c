@@ -94,7 +94,7 @@ AP_FlagValue **ap_read(MArena *arenaptr, size_t argc, char **argv, size_t fcount
         /* create a memory allocation for the value, that is coming */
 
         AP_FlagValue *fvalue;
-        if (fvalue = marena_alloc(arenaptr, sizeof(AP_FlagValue)) == NULL)
+        if ((fvalue = marena_alloc(arenaptr, sizeof(AP_FlagValue))) == NULL)
         {
             return NULL;
         }
@@ -128,7 +128,7 @@ AP_FlagValue **ap_read(MArena *arenaptr, size_t argc, char **argv, size_t fcount
 
             if (values[fidx]->tail->value != NULL)
             {
-                if (fvalue = marena_alloc(arenaptr, sizeof(AP_FlagValue)) == NULL)
+                if ((fvalue = (AP_FlagValue *)marena_alloc(arenaptr, sizeof(AP_FlagValue))) == NULL)
                 {
                     return values;
                 }
@@ -180,7 +180,7 @@ char *ap_concat_value(MArena *arenaptr, AP_FlagValue *fvalueptr)
     char *value;
     size_t offset = 0;
 
-    if (value = marena_alloc(arenaptr, length) == NULL)
+    if ((value = marena_alloc(arenaptr, length)) == NULL)
     {
         return NULL;
     }
@@ -329,14 +329,14 @@ MN_Token *mn_create_token(MArena *arenaptr, size_t token_type, char *buffer)
     /* TODO do some sanity checks that the information given are valid*/
 
     MN_Token *t;
-    if (t = marena_alloc(arenaptr, sizeof(MN_Token)) == NULL)
+    if ((t = marena_alloc(arenaptr, sizeof(MN_Token))) == NULL)
     {
         return NULL;
     }
 
     if (token_type & MNTT_IDENT)
     {
-        if (t->value.s = marena_alloc(arenaptr, length + 1) == NULL)
+        if ((t->value.s = marena_alloc(arenaptr, length + 1)) == NULL)
         {
             return NULL;
         };
@@ -550,7 +550,7 @@ MN_Token *mn_parse(MArena *arenaptr, char *input)
 char *lltobstr(MArena *arenaptr, long long n)
 {
     char *s;
-    if (s = marena_alloc(arenaptr, 3 + sizeof(n) * 8 + 1) == NULL)
+    if ((s = marena_alloc(arenaptr, 3 + sizeof(n) * 8 + 1)) == NULL)
     {
         return NULL;
     }
@@ -667,7 +667,7 @@ int main(int argc, char **argv)
                 {
                     binstr = "0b0";
                 }
-                printf("\"%s\" = %s\n", s, lltobstr(arena, t->value.i));
+                printf("\"%s\" = %s\n", s, binstr);
             }
         }
     }
