@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include "umn.h"
 
 typedef struct
 {
@@ -597,6 +598,9 @@ char *lltobstr(MArena *arenaptr, long long n)
 
 int main(int argc, char **argv)
 {
+    /* "0xa - (-0b11) = 13a_0o71öl_pastej∑" */
+    umn_parse("-0.1");
+
     void *arena = marena_init();
 
     const size_t F_DECIMAL = 0, F_BINARY = 1, F_OCTAL = 2, F_HEX = 3, F_INTERACTIVE = 4, F_UNDEFINED = 5;
