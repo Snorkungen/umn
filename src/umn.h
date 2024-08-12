@@ -715,7 +715,7 @@ void umn_parse(__uint8_t *data)
     if (arena == NULL)
     {
         fputs("umn_parse: failed to initialise the memory arena\n", stderr);
-        return;
+        goto error_bad;
     }
 
     /* instead of node list use a stack */
@@ -723,7 +723,7 @@ void umn_parse(__uint8_t *data)
     if (node_stack == NULL)
     {
         fputs("umn_parse: failed to initialise node stack\n", stderr);
-        return;
+        goto error_bad;
     }
 
     static struct UMN_PNode pnode = {};
@@ -741,7 +741,7 @@ void umn_parse(__uint8_t *data)
         {
             /* debug print the surounding characters on a line */
             umn_parse_print_error(&tokeniser, pnode.token);
-            return;
+            goto error_bad;
         }
         else if (umn_kind_compare(pnode.token.kind, UMN_KIND_EOF))
         {
@@ -758,7 +758,7 @@ void umn_parse(__uint8_t *data)
             /* TODO: stack has probably reached it's capacity and needs to be expanded */
 
             fputs("umn_parse: failed to push node onto stack\n", stderr);
-            return;
+            goto error_bad;
         }
     } while (umn_kind_compare(pnode.token.kind, UMN_KIND_EOF) == 0);
 
@@ -787,7 +787,7 @@ void umn_parse(__uint8_t *data)
             if (next == NULL)
             {
                 umn_parse_print_error(&tokeniser, curr->token);
-                return;
+                goto error_bad;
             }
 
             if (prev == NULL)
@@ -798,7 +798,7 @@ void umn_parse(__uint8_t *data)
                 }
 
                 umn_parse_print_error(&tokeniser, curr->token);
-                return;
+                goto error_bad;
             }
 
             /* now comes the hard part deal with operator precedence */
@@ -857,16 +857,17 @@ void umn_parse(__uint8_t *data)
     if (node_stack->index == 1)
     {
         /* Quit nothing to do ?? */
-        return;
     }
     else if (node_stack->index == 0)
     {
-        return; /* IDK */
     }
 
     /* finally delete the arena */
     umn_arena_delete(arena);
+    return;
 
+error_bad:
+    umn_arena_delete(arena);
     return;
 }
 
