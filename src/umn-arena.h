@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <malloc.h>
+#include <assert.h>
 
 struct UMN_Arena
 {
@@ -30,12 +31,11 @@ umn_arena_init(size_t arena_size)
     {
         return arena;
     }
-
     /* set the fields of the arena */
     arena->start = arena; /* pointer to itself why not ?? */
-    arena->end = arena + sizeof(struct UMN_Arena) + arena_size;
+    arena->end = (void *)arena + sizeof(struct UMN_Arena) + arena_size;
 
-    arena->head = arena + sizeof(struct UMN_Arena);
+    arena->head = (void *)arena + sizeof(struct UMN_Arena);
     arena->prev = arena->head;
 
     return arena;
@@ -143,10 +143,10 @@ void *umn_arena_realloc(struct UMN_Arena *arena, void *allocation, size_t alloc_
         size_t prev_size = umn_arena_allocation_size(allocation);
         umn_arena_free(arena, allocation); /* free the allocation because a new allocation is going to happen */
 
-
         void *new_allocation = umn_arena_alloc(arena, alloc_size);
-        
-        if (new_allocation == NULL) {
+
+        if (new_allocation == NULL)
+        {
             return NULL;
         }
 
@@ -156,6 +156,120 @@ void *umn_arena_realloc(struct UMN_Arena *arena, void *allocation, size_t alloc_
     }
 
     return NULL;
+}
+
+/* A fixed LIFO stack of same sized elements */
+struct UMN_Stack
+{
+    void *data; /* backing memory allocation */
+
+    size_t index; /* stack pointer */
+    size_t element_capacity;
+    size_t element_size;
+};
+
+struct UMN_Stack *
+umn_stack_init(struct UMN_Arena *arena, size_t element_capacity, size_t element_size)
+{
+    /* first allocate memory for the stack from the arena */
+    /* I'm just lazy and  use an arena for all allocations so the arena can just be deleted at a later date */
+    const size_t allocation_size = (element_capacity * element_size) + (sizeof(struct UMN_Stack));
+    struct UMN_Stack *stack = umn_arena_alloc(arena, allocation_size);
+
+    if (stack == NULL)
+    {
+        return NULL; /* the arena allocation failed */
+    }
+
+    /* set the stack member values */
+    stack->data = (void *)stack + sizeof(struct UMN_Stack);
+
+    stack->element_capacity = element_capacity;
+    stack->element_size = element_size;
+    stack->index = 0;
+
+    return stack;
+}
+
+struct UMN_Stack *
+umn_stack_resize(struct UMN_Stack, struct UMN_Arena *arena, size_t new_element_capacity)
+{
+    assert(0), "TODO: implement this method";
+}
+
+/* @return 0 = success, -1 = fail */
+int umn_stack_push(struct UMN_Stack *stack, void *src_element, struct UMN_Arena *arena)
+{
+    if (stack == NULL || src_element == NULL)
+    {
+        return -1; /* bad parameters */
+    }
+
+    /* check if there is room in the stack */
+    if ((stack->index + 1) >= stack->element_capacity)
+    {
+        return -1; /* no room in stack */
+    }
+
+    /* memmove data into the stack */
+    memmove(
+        ((void *)stack->data + (stack->index * stack->element_size)), /* destination */
+        src_element,                                                  /* source */
+        stack->element_size);
+
+    /* increment index */
+    stack->index += 1;
+
+    return 0;
+}
+
+/* @return 0 = success, -1 = fail */
+int umn_stack_pop(struct UMN_Stack *stack, void *dest_element)
+{
+    if (stack == NULL || dest_element == NULL)
+    {
+        return -1; /* bad parameters */
+    }
+
+    /* check that stack can pop */
+    if (stack->index == 0)
+    {
+        return -1;
+    }
+
+    /* decrement index */
+    stack->index -= 1;
+
+    /* read from index position into element */
+    memmove(
+        dest_element,                                                 /* destination */
+        ((void *)stack->data + (stack->index * stack->element_size)), /* source */
+        stack->element_size);
+
+    return 0;
+}
+
+/* @return 0 = success, -1 = fail */
+int umn_stack_peek(struct UMN_Stack *stack, void *dest_element, size_t ncount)
+{
+    if (stack == NULL || dest_element == NULL)
+    {
+        return -1; /* bad parameters */
+    }
+
+    /* check that stack has enough elements to peek so far back */
+    if (ncount > stack->index)
+    {
+        return -1;
+    }
+
+    /* read from index position into element */
+    memmove(
+        dest_element,                                                            /* destination */
+        ((void *)stack->data + ((stack->index - ncount) * stack->element_size)), /* source */
+        stack->element_size);
+
+    return 0;
 }
 
 #endif

@@ -21,48 +21,77 @@
 #include <assert.h>
 
 /* BEGINING OF KIND MAGIC */
-typedef union
-{
-    size_t full; /* allow easier comparison */
-    struct
-    {
-        __uint8_t data; /* 8-bit field where kind specific information get's stored */
 
-        __uint8_t is_error : (1);   /* if the token is an error */
-        __uint8_t is_eof : (1);     /* the token is the last token in the tokeniser datas */
-        __uint8_t is_numeric : (1); /* if the number is either a INTEGER or FRACTION */
-        __uint8_t is_literal : (1);
+/* UMN_Kind is a bit field */
+typedef size_t UMN_Kind;
 
-        __uint8_t is_integer : (1);
-        __uint8_t is_fraction : (1);
-        __uint8_t is_operator : (1);
-    };
-} UMN_Kind;
+/* define bit field structure */
+#define UMN_KIND_BF_DATA (0xFFUL << (7 * 8)) /* this is a data mask */
+
+#define UMN_KIND_BF_ERROR (0x80UL << (6 * 8))
+#define UMN_KIND_BF_EOF (0x40UL << (6 * 8))
+#define UMN_KIND_BF_NUMERIC (0x20UL << (6 * 8))
+#define UMN_KIND_BF_LITERAL (0x10UL << (6 * 8))
+
+#define UMN_KIND_BF_INTEGER (0x08UL << (6 * 8))
+#define UMN_KIND_BF_FRACTION (0x04UL << (6 * 8))
+#define UMN_KIND_BF_KEYWORD (0x02UL << (6 * 8))
+#define UMN_KIND_BF_OPERATOR (0x01UL << (6 * 8))
+
+#define UMN_KIND_BF_VARIABLE (0x80UL << (5 * 8))
+#define UMN_KIND_BF_COMMUTES (0x40UL << (5 * 8)) /* Operation has the commutative property */
+#define UMN_KIND_BF_UNARY (0x20UL << (5 * 8))
+
+/* define a macro that would allow the usage of the stuff as integer constants */
+#define UMN_KIND_CREATE_DATA(DATA) ((size_t)(DATA) << (7 * 8))
+#define UMN_KIND_CREATE_KWORD(DATA) (UMN_KIND_CREATE_DATA(DATA) | UMN_KIND_BF_LITERAL | UMN_KIND_BF_KEYWORD)
+
+#define UMN_KIND_CREATE_OPERATOR(DATA, PREC_LEVEL) (UMN_KIND_CREATE_DATA(((DATA) << 3) | ((PREC_LEVEL) & 0x07)) | UMN_KIND_BF_LITERAL | UMN_KIND_BF_KEYWORD | UMN_KIND_BF_OPERATOR)
+#define UMN_KIND_OPERATOR_PREC_LEVEl(KIND) ((char)((KIND) >> (7 * 8)) & (0x07)) /* the needed data is in the bottom 3 bits*/
+
+/* define constant UMN_KIND_**/
+#define UMN_KIND_ERROR UMN_KIND_BF_ERROR
+#define UMN_KIND_EOF UMN_KIND_BF_EOF
+#define UMN_KIND_INTEGER UMN_KIND_BF_NUMERIC | UMN_KIND_BF_INTEGER
+#define UMN_KIND_FRACTION UMN_KIND_BF_NUMERIC | UMN_KIND_BF_FRACTION
+#define UMN_KIND_LITERAL UMN_KIND_BF_LITERAL
+
+#define UMN_KIND_VARIABLE UMN_KIND_BF_LITERAL | UMN_KIND_BF_VARIABLE
+
+/* keywords are just unique literals with no no real meaning */
+#define UMN_KIND_EQUALS UMN_KIND_CREATE_KWORD(6)
+#define UMN_KIND_OBRACKET UMN_KIND_CREATE_KWORD(7) /* Opening bracket "(" */
+#define UMN_KIND_CBRACKET UMN_KIND_CREATE_KWORD(8) /* Closing bracket ")" */
+
+/* for simplicity just do the straight forward thing, same as i have done previously */
+
+#define UMN_KIND_ADD UMN_KIND_CREATE_OPERATOR(1, 1) | UMN_KIND_BF_UNARY /* Unary indicates the operator could be unary */ | UMN_KIND_BF_COMMUTES
+#define UMN_KIND_SUB UMN_KIND_CREATE_OPERATOR(2, 1) | UMN_KIND_BF_UNARY
+#define UMN_KIND_DIV UMN_KIND_CREATE_OPERATOR(3, 2)
+#define UMN_KIND_MULT UMN_KIND_CREATE_OPERATOR(4, 2) | UMN_KIND_BF_COMMUTES
+#define UMN_KIND_EXP UMN_KIND_CREATE_OPERATOR(5, 3)
+/* TODO: figure out the special combination of bit flags to indicate that the following  are unary operators*/
+/* TODO:
+    Operator data is some magic bs i do not know yet what
+*/
 
 /* compare if the values are the same, ignoring data fields */
-static inline int umn_kind_compare(UMN_Kind kind1, UMN_Kind kind2)
+static inline int
+umn_kind_compare(UMN_Kind kind1, UMN_Kind kind2)
 {
-    return (kind1.full >> (sizeof(kind1.data) * 8)) == (kind2.full >> (sizeof(kind2.data) * 8));
+    return (kind1 & ~UMN_KIND_BF_DATA) == (kind2 & ~UMN_KIND_BF_DATA);
 }
 
-const static UMN_Kind UMN_KIND_ERROR = {.is_error = 1};
-const static UMN_Kind UMN_KIND_EOF = {.is_eof = 1};
-const static UMN_Kind UMN_KIND_INTEGER = {.is_numeric = 1, .is_integer = 1};
-const static UMN_Kind UMN_KIND_FRACTION = {.is_numeric = 1, .is_fraction = 1};
-const static UMN_Kind UMN_KIND_LITERAL = {.is_literal = 1};
+/* for keywords, where the data field differentiates the keywords */
+static inline int umn_kind_compare_keyword(UMN_Kind kind1, UMN_Kind kind2)
+{
+    return kind1 == kind2;
+}
 
-/* predefined keywords operators */
-const static UMN_Kind UMN_KIND_PLUS = {.is_literal = 1, .is_operator = 1}; /* how does unary operation work ?? */
-const static UMN_Kind UMN_KIND_MINUS = {.is_literal = 1, .is_operator = 1};
-const static UMN_Kind UMN_KIND_FSLASH = {.is_literal = 1, .is_operator = 1};
-const static UMN_Kind UMN_KIND_STAR = {.is_literal = 1, .is_operator = 1};
-const static UMN_Kind UMN_KIND_STAR_STAR = {.is_literal = 1, .is_operator = 1};
-const static UMN_Kind UMN_KIND_EQUALS = {.is_literal = 1, .is_operator = 1};
-
-/* predefined  meaningful notation get this to compile */
-const static UMN_Kind UMN_KIND_OBRACKET = {.data = 0x70, .is_literal = 1}; /* Opening bracket "(" */
-const static UMN_Kind UMN_KIND_CBRACKET = {.data = 0xF0, .is_literal = 1}; /* Opening bracket ")" */
-
+/* for keywords, where the data field differentiates the keywords */
+#define umn_kind_is(KIND, COMP_KIND) (size_t)((KIND) & (COMP_KIND))
+#define umn_kind_is_keyword(KIND) umn_kind_is(KIND, UMN_KIND_BF_KEYWORD)
+#define umn_kind_is_operator(KIND) umn_kind_is(KIND, UMN_KIND_BF_OPERATOR)
 /* END OF KIND MAGIC */
 
 struct UMN_Token
@@ -82,14 +111,15 @@ struct UMN_Keyword
 };
 
 #define UMN_KWORD_COUNT 8
-#define UMN_CREATE_KWORD(KIND, NAME) {.kind = KIND, .size = sizeof(NAME) - 1 /* remove null byte from size */, .name = NAME}
+#define UMN_CREATE_KWORD(KIND, NAME) {.kind = (KIND), .size = sizeof(NAME) - 1 /* remove null byte from size */, .name = NAME}
 
 static struct UMN_Keyword UMN_keywords[] = {
-    UMN_CREATE_KWORD(UMN_KIND_PLUS, "+"),
-    UMN_CREATE_KWORD(UMN_KIND_MINUS, "-"),
-    UMN_CREATE_KWORD(UMN_KIND_STAR, "*"),
-    UMN_CREATE_KWORD(UMN_KIND_FSLASH, "/"),
-    UMN_CREATE_KWORD(UMN_KIND_STAR_STAR, "**"),
+    UMN_CREATE_KWORD(UMN_KIND_ADD, "+"),
+    UMN_CREATE_KWORD(UMN_KIND_SUB, "-"),
+    UMN_CREATE_KWORD(UMN_KIND_MULT, "*"),
+    UMN_CREATE_KWORD(UMN_KIND_DIV, "/"),
+    UMN_CREATE_KWORD(UMN_KIND_EXP, "**"),
+
     UMN_CREATE_KWORD(UMN_KIND_OBRACKET, "("),
     UMN_CREATE_KWORD(UMN_KIND_CBRACKET, ")"),
     UMN_CREATE_KWORD(UMN_KIND_EQUALS, "="),
@@ -488,31 +518,99 @@ umn_tokeniser_get(struct UMN_tokeniser *t)
     return (struct UMN_Token){.kind = UMN_KIND_ERROR};
 }
 
-struct UMN_Token
-umn_tokeniser_peek(struct UMN_tokeniser *t)
-{
-    size_t position = t->position;
-    struct UMN_Token token = umn_tokeniser_get(t);
-    t->position = position;
-    return token;
-}
-
 /* include an arena where i can keep stuff */
 #include "umn-arena.h"
 
 static inline void umn_token_print(struct UMN_Token token)
 {
+    /* token kind to string */
+    char *s = "\0"; /* empty null string */
+    switch (token.kind)
+    {
+    case UMN_KIND_ERROR:
+        s = "UMN_KIND_ERROR";
+        break;
+    case UMN_KIND_EOF:
+        s = "UMN_KIND_EOF";
+        break;
+    case UMN_KIND_INTEGER:
+        s = "UMN_KIND_INTEGER";
+        break;
+    case UMN_KIND_FRACTION:
+        s = "UMN_KIND_FRACTION";
+        break;
+    case UMN_KIND_LITERAL:
+        s = "UMN_KIND_LITERAL";
+        break;
+    case UMN_KIND_ADD:
+        s = "UMN_KIND_ADD";
+        break;
+    case UMN_KIND_SUB:
+        s = "UMN_KIND_SUB";
+        break;
+    case UMN_KIND_DIV:
+        s = "UMN_KIND_DIV";
+        break;
+    case UMN_KIND_MULT:
+        s = "UMN_KIND_MULT";
+        break;
+    case UMN_KIND_EXP:
+        s = "UMN_KIND_EXP";
+        break;
+    case UMN_KIND_EQUALS:
+        s = "UMN_KIND_EQUALS";
+        break;
+    case UMN_KIND_OBRACKET:
+        s = "UMN_KIND_OBRACKET";
+        break;
+    case UMN_KIND_CBRACKET:
+        s = "UMN_KIND_CBRACKET";
+        break;
+    }
+
     if (umn_kind_compare(token.kind, UMN_KIND_INTEGER))
     {
-        printf("Token.kind = %ld, Token.value_int = %ld, Token.begin = %zu, Token.end = %zu\n", token.kind.full, token.value[0], token.begin, token.end);
+        printf("Token.kind = %s, Token.value_int = %ld, Token.begin = %zu, Token.end = %zu\n", s, token.value[0], token.begin, token.end);
     }
     else if (umn_kind_compare(token.kind, UMN_KIND_FRACTION))
     {
-        printf("Token.kind = %ld, Token.value_float = %f, Token.begin = %zu, Token.end = %zu\n", token.kind.full, (double)token.value[0] / token.value[1], token.begin, token.end);
+        printf("Token.kind = %s, Token.value_float = %f, Token.begin = %zu, Token.end = %zu\n", s, (double)token.value[0] / token.value[1], token.begin, token.end);
     }
     else
     {
-        printf("Token.kind = %ld, Token.value_str = \'%s\', Token.begin = %zu, Token.end = %zu\n", token.kind.full, (char *)token.value, token.begin, token.end);
+        printf("Token.kind = %s, Token.value_str = \'%s\', Token.begin = %zu, Token.end = %zu\n", s, (char *)token.value, token.begin, token.end);
+    }
+}
+
+void umn_parse_print_error(struct UMN_tokeniser *tokeniser, struct UMN_Token token)
+{
+    static __uint8_t msg_buffer[80]; /* this could be static so that it could be modified and stuff */
+
+    if (tokeniser->data_length >= sizeof(msg_buffer))
+    {
+        /* unhandled do some kind of processing IDK */
+        printf("umn_parse: failed to output error message, at (%zu -> %zu)\n", token.begin, token.end);
+        return;
+    }
+    else
+    {
+        assert(tokeniser->data[tokeniser->data_length] == '\0');
+
+        fputs(tokeniser->data, stderr); /* assume there is a null byte */
+        fputc('\n', stderr);            /* write new line */
+
+        for (size_t i = 0; i < tokeniser->data_length; i++)
+        {
+            fputc(
+                (i == token.begin) ? '^' : (i > token.begin && i < token.end) ? '~'
+                                                                              : ' ',
+                stderr);
+        }
+
+        fputc('\n', stderr); /* write new line */
+
+        /* TODO: get a error message from somewhere ...*/
+        fputs("Something went wrong with the tokeniser \n", stderr);
     }
 }
 
@@ -526,6 +624,80 @@ struct UMN_PNode
     struct UMN_PNode *children; /* this would be a pointer to an array of nodes that are children */
 };
 
+int umn_parse_node_to_string(__uint8_t *s, size_t max_len, struct UMN_PNode *pnode, int wrap /* wheter node should be wrapped within brackets*/)
+{
+    int n = 0;
+    if (wrap && (max_len - n) > 1)
+    {
+        s[n++] = '(';
+    }
+
+    if (umn_kind_is(pnode->token.kind, UMN_KIND_BF_INTEGER))
+    {
+        /* keep in mind the different encoding available */
+        n += snprintf(s + n, max_len - n, "%ld", pnode->token.value[0]);
+    }
+    else if (umn_kind_is(pnode->token.kind, UMN_KIND_BF_FRACTION))
+    {
+        n += snprintf(s + n, max_len - n, "%f", (double)pnode->token.value[0] / pnode->token.value[1]);
+    }
+    else if (!umn_kind_is(pnode->token.kind, UMN_KIND_LITERAL))
+    {
+        /* not a literal so nothing */
+        n += (*s = 0);
+    }
+    else if (pnode->child_count == 0)
+    {
+        n += snprintf(s + n, max_len - n, "%s", (char *)(pnode->token.value));
+    }
+    else
+    {
+        assert(pnode->children);
+
+        if (pnode->child_count == 1)
+        {
+            n += snprintf(s + n, max_len - n, "%s", (char *)(pnode->token.value));
+            n += umn_parse_node_to_string(s + n, max_len - n, pnode->children, 0);
+        }
+        else
+        {
+            for (size_t i = 0; i < pnode->child_count && (max_len - n) > 1; i++)
+            {
+                if (i > 0)
+                {
+                    s[n++] = ' ';
+
+                    n += snprintf(s + n, max_len - n, "%s", (char *)(pnode->token.value));
+                    if ((max_len - n) < 0)
+                    {
+                        return n;
+                    }
+                    s[n++] = ' ';
+                }
+
+                /* if child is an operator with an inferior operator precedence level */
+                int should_wrap = (umn_kind_is(((pnode->children + i)->token.kind), UMN_KIND_BF_OPERATOR)) && UMN_KIND_OPERATOR_PREC_LEVEl((pnode->children + i)->token.kind) < UMN_KIND_OPERATOR_PREC_LEVEl(pnode->token.kind);
+                n += umn_parse_node_to_string(s + n, max_len - n, pnode->children + i, should_wrap);
+            }
+        }
+    }
+
+    if (wrap && (max_len - n) > 1)
+    {
+        s[n++] = ')';
+    }
+
+    return n;
+}
+
+void umn_parse_node_print(struct UMN_PNode *pnode)
+{
+    char message_buffer[100] = {0};
+
+    umn_parse_node_to_string(message_buffer, 99, pnode, 0);
+    puts(message_buffer);
+}
+
 void umn_parse(__uint8_t *data)
 {
     struct UMN_tokeniser tokeniser = {
@@ -538,7 +710,7 @@ void umn_parse(__uint8_t *data)
         .keywords_count = UMN_KWORD_COUNT,
     };
 
-    /* initialse the arean */
+    /* initialse the arena */
     struct UMN_Arena *arena = umn_arena_init(sizeof(struct UMN_PNode) * 200);
     if (arena == NULL)
     {
@@ -546,157 +718,156 @@ void umn_parse(__uint8_t *data)
         return;
     }
 
-    size_t node_list_capacity = 20, node_list_size = 0;
-    struct UMN_PNode *node_list = umn_arena_alloc(arena, sizeof(struct UMN_PNode) * node_list_capacity);
-    if (node_list == NULL)
+    /* instead of node list use a stack */
+    struct UMN_Stack *node_stack = umn_stack_init(arena, 50 /* have the space for 30 elements */, sizeof(struct UMN_PNode));
+    if (node_stack == NULL)
     {
-        fputs("umn_parse: failed to initialise the node_list\n", stderr);
+        fputs("umn_parse: failed to initialise node stack\n", stderr);
         return;
     }
 
-    struct UMN_PNode head = {};
-
-    struct UMN_Token token_prev = {}; /* this might be wasteful initialize an empty token to begin with */
-    struct UMN_Token token = {};
+    static struct UMN_PNode pnode = {};
 
     /* approach from <https://github.com/Snorkungen/expression/blob/master/expression_tree_builder2.py> */
 
     /* collect tokens into a node list */
-    while (umn_kind_compare(token.kind, UMN_KIND_EOF) == 0)
-    {
-        token = umn_tokeniser_get(&tokeniser);
 
-        /* emit information that something has gone wrong when getting token */
-        if (umn_kind_compare(token.kind, UMN_KIND_ERROR))
+    do /* just read all nodes and push*/
+    {
+        pnode.token = umn_tokeniser_get(&tokeniser);
+
+        /* Handle an errors from tokeniser */
+        if (umn_kind_compare(pnode.token.kind, UMN_KIND_ERROR))
         {
             /* debug print the surounding characters on a line */
-            static __uint8_t msg_buffer[80]; /* this could be static so that it could be modified and stuff */
-
-            if (tokeniser.data_length >= sizeof(msg_buffer))
-            {
-                /* unhandled do some kind of processing IDK */
-                printf("umn_parse: failed to output error message, at (%zu -> %zu)\n", token.begin, token.end);
-                return;
-            }
-            else
-            {
-                assert(tokeniser.data[tokeniser.data_length] == '\0');
-
-                fputs(tokeniser.data, stderr); /* assume there is a null byte */
-                fputc('\n', stderr);           /* write new line */
-
-                for (size_t i = 0; i < tokeniser.data_length; i++)
-                {
-                    fputc(
-                        (i == token.begin) ? '^' : (i > token.begin && i < token.end) ? '~'
-                                                                                      : ' ',
-                        stderr);
-                }
-
-                fputc('\n', stderr); /* write new line */
-
-                /* TODO: get a error message from somewhere ...*/
-                fputs("Something went wrong with the tokeniser \n", stderr);
-            }
-
-            continue;
+            umn_parse_print_error(&tokeniser, pnode.token);
+            return;
         }
-        else if (umn_kind_compare(token.kind, UMN_KIND_EOF))
+        else if (umn_kind_compare(pnode.token.kind, UMN_KIND_EOF))
         {
             break;
         }
 
-        /* just collect all nodes int an array */
-        if (node_list_size >= node_list_capacity)
-        {
-            node_list_capacity *= 2;
-            node_list = umn_arena_realloc(arena, node_list, sizeof(struct UMN_PNode) * node_list_capacity);
+        // (umn_stack_peek(node_stack, &prev_node, 1) /* true if failed to read previous node */ || umn_kind_is_operator(prev_node.token.kind))
 
-            if (node_list == NULL)
+        /* push node onto stack */
+        if (umn_stack_push(node_stack, &pnode, NULL))
+        {
+            /* handle error failed to push node onto stack */
+
+            /* TODO: stack has probably reached it's capacity and needs to be expanded */
+
+            fputs("umn_parse: failed to push node onto stack\n", stderr);
+            return;
+        }
+    } while (umn_kind_compare(pnode.token.kind, UMN_KIND_EOF) == 0);
+
+    /* the stack was an idea but let's just use an array */
+
+    struct UMN_Stack *child_stack = umn_stack_init(arena, 10, sizeof(struct UMN_PNode));
+    assert(child_stack != NULL);
+
+    struct UMN_PNode *curr = NULL, *prev, *next;
+    char oper_prec_level = 5; /* [brackets are handled seperately] unary_operators(5) functions(4), exponentiation(3), multiply/division(2) addition/subtraction(1) */
+    do                        /* do stuff */
+    {
+        for (size_t i = 0; i < node_stack->index; i++)
+        {
+            curr = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i));
+            prev = (i > 0) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i - 1))) : NULL;
+            next = ((i + 1) < node_stack->index) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + 1)))
+                                                 : NULL;
+
+            /* for testing only care about operators */
+            if (!umn_kind_is_operator(curr->token.kind))
             {
-                fputs("umn_parse: node_list reached it's capacity\n", stderr);
+                continue; /* only operators have a use */
+            }
+
+            if (next == NULL)
+            {
+                umn_parse_print_error(&tokeniser, curr->token);
                 return;
             }
+
+            if (prev == NULL)
+            {
+                if (umn_kind_is(curr->token.kind, UMN_KIND_BF_UNARY))
+                {
+                    /* check something according to some types of rules and do stuff skip for now */
+                }
+
+                umn_parse_print_error(&tokeniser, curr->token);
+                return;
+            }
+
+            /* now comes the hard part deal with operator precedence */
+            if (oper_prec_level > UMN_KIND_OPERATOR_PREC_LEVEl(curr->token.kind))
+            {
+                continue; /* touch this on the next pass */
+            }
+
+            /* small loop to collect children */
+            child_stack->index = 0;
+            assert(umn_stack_push(child_stack, prev, arena) == 0);
+            assert(umn_stack_push(child_stack, next, arena) == 0);
+
+            if (umn_kind_is(curr->token.kind, UMN_KIND_BF_COMMUTES))
+            {
+                for (size_t j = i + 2; (j + 1) < node_stack->index; j += 2)
+                {
+                    if (((struct UMN_PNode *)(node_stack->data + (node_stack->element_size * j)))->token.kind == curr->token.kind)
+                    {
+                        // assert(umn_stack_push(child_stack, (node_stack->data + (node_stack->element_size * (j - 1))), arena) == 0);
+                        assert(umn_stack_push(child_stack, (node_stack->data + (node_stack->element_size * (j + 1))), arena) == 0);
+                    }
+                }
+            }
+
+            curr->child_count = child_stack->index;
+            curr->children = umn_arena_alloc(arena, sizeof(struct UMN_PNode) * curr->child_count);
+
+            int elements_to_shift_by = (curr->child_count - 1) * 2;
+
+            memcpy(curr->children, child_stack->data, sizeof(struct UMN_PNode) * curr->child_count);
+
+            /* Do some array modificiations so the stack is happy */
+
+            /* check if there are bytes to copy back */
+
+            memcpy(&pnode, curr, (sizeof(struct UMN_PNode)));
+            umn_parse_node_print(&pnode);
+
+            memmove(
+                node_stack->data + (i)*node_stack->element_size,
+                node_stack->data + ((i + elements_to_shift_by) * node_stack->element_size),
+                (node_stack->element_capacity * node_stack->element_size) - ((i + elements_to_shift_by) * node_stack->element_size));
+
+            /* move stack index back by 2 */
+
+            node_stack->index -= elements_to_shift_by;
+
+            memcpy(node_stack->data + (i - 1) * node_stack->element_size, &pnode, (sizeof(struct UMN_PNode)));
+
+            i -= 1; /* move index back to rectify that the stack has been m modified */
         }
-
-        /* append node to list */
-        memcpy(&node_list[node_list_size++].token, &token, sizeof(token));
-    };
-
-    /* loop through nodes and do stuff */
-    for (size_t i = 0; i < node_list_size; i++)
-    {
-
-        token = node_list[i].token;
-        /* Read token and do something idk what but all right ...*/
-        /* What is the  goal to construct an tre structure ??*/
-
-        /* read and emit token */
-        umn_token_print(token);
-    }
+    } while (--oper_prec_level > 0);
 
     /* handle edge case */
-    if (node_list_size == 1)
+    if (node_stack->index == 1)
     {
         /* Quit nothing to do ?? */
         return;
     }
-    else if (node_list_size == 0)
+    else if (node_stack->index == 0)
     {
         return; /* IDK */
     }
 
-    struct UMN_PNode *curr_node = NULL, *prev_node = NULL;
-
-    /* this thing needs a stack of operator ??*/
-
-    /* First pass use unary operators ?? */
-    for (size_t i = 0; i < node_list_size; i++)
-    {
-        curr_node = &node_list[i];
-
-        /* Context would describe the action of the token */
-        if (umn_kind_compare(curr_node->token.kind, UMN_KIND_PLUS) || umn_kind_compare(curr_node->token.kind, UMN_KIND_MINUS))
-        {
-            /*
-                Is unary operator
-                    - first token, in series
-                    - previous token is an operator
-            */
-            if (prev_node == NULL || prev_node->token.kind.is_operator)
-            {
-                /* the node is a unary operator */
-                /* rewrite plus literal to an a POSITIVE kind */
-
-                /* get the next node in the series */
-
-                puts("this is a unary operator");
-                if (i + 1 < node_list_size)
-                {
-                    struct UMN_Token next_token = node_list[i + 1].token;
-
-                    if (curr_node->token.end != next_token.begin)
-                    {
-                        /* this should be a warning due to you doing some stuff like "+ 2" ?? or " (- a)"*/
-                    }
-
-                    /* Dispatch some magic function that modifies the following token and constructs a new node */
-
-                    if (next_token.kind.is_numeric)
-                    {
-                        next_token.value[0] *= -1;
-                    }
-
-                    umn_token_print(next_token);
-                }
-            }
-        }
-
-        prev_node = curr_node;
-    }
-
     /* finally delete the arena */
     umn_arena_delete(arena);
+
+    return;
 }
 
 #endif /* UMN_H */
