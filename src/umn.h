@@ -909,7 +909,7 @@ void umn_parse(__uint8_t *data)
                     // printf("node stack index = %zu oper_prec = %d, ", node_stack->index, oper_prec_level);
                     // umn_parse_node_print(curr);
 
-                    if (!umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR))
+                    if (!umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) || (!umn_kind_compare(next->token.kind, curr->token.kind) && next->child_count))
                     {
                         assert(umn_stack_push(child_stack, next, arena) == 0);
                         offset_amount++;
@@ -918,7 +918,9 @@ void umn_parse(__uint8_t *data)
 
                     if (!umn_kind_compare(next->token.kind, curr->token.kind))
                     {
-                        break;
+                        umn_parse_print_error(&tokeniser, (struct UMN_Token){.begin = curr->token.begin, .end = next->token.end});
+                        fputs("umn_parse: unexpected token #956-43243", stderr);
+                        goto error_bad;
                     }
 
                     offset_amount++;
