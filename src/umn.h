@@ -71,27 +71,20 @@ typedef size_t UMN_Kind;
 #define UMN_KIND_SUB UMN_KIND_CREATE_OPERATOR(2, 1) | UMN_KIND_BF_UNARY
 #define UMN_KIND_DIV UMN_KIND_CREATE_OPERATOR(3, 2)
 #define UMN_KIND_MULT UMN_KIND_CREATE_OPERATOR(4, 2) | UMN_KIND_BF_COMMUTES
-#define UMN_KIND_EXP UMN_KIND_CREATE_OPERATOR(5, 3)
+#define UMN_KIND_EXP UMN_KIND_CREATE_OPERATOR(5, 4)
 /* TODO: figure out the special combination of bit flags to indicate that the following  are unary operators*/
 /* TODO:
     Operator data is some magic bs i do not know yet what
 */
 
-/* compare if the values are the same, ignoring data fields */
-static inline int
-umn_kind_compare(UMN_Kind kind1, UMN_Kind kind2)
-{
-    return (kind1 & ~UMN_KIND_BF_DATA) == (kind2 & ~UMN_KIND_BF_DATA);
-}
-
 /* for keywords, where the data field differentiates the keywords */
-static inline int umn_kind_compare_keyword(UMN_Kind kind1, UMN_Kind kind2)
+static inline int umn_kind_compare(UMN_Kind kind1, UMN_Kind kind2)
 {
     return kind1 == kind2;
 }
 
 /* for keywords, where the data field differentiates the keywords */
-#define umn_kind_is(KIND, COMP_KIND) (size_t)((KIND) & (COMP_KIND))
+#define umn_kind_is(KIND, COMP_KIND) (!!((size_t)((KIND) & (COMP_KIND))))
 #define umn_kind_is_keyword(KIND) umn_kind_is(KIND, UMN_KIND_BF_KEYWORD)
 #define umn_kind_is_operator(KIND) umn_kind_is(KIND, UMN_KIND_BF_OPERATOR)
 /* END OF KIND MAGIC */
@@ -659,7 +652,7 @@ int umn_parse_node_to_string(__uint8_t *s, size_t max_len, struct UMN_PNode *pno
         if (pnode->child_count == 1)
         {
             n += snprintf(s + n, max_len - n, "%s", (char *)(pnode->token.value));
-            n += umn_parse_node_to_string(s + n, max_len - n, pnode->children, 0);
+            n += umn_parse_node_to_string(s + n, max_len - n, pnode->children, pnode->children->child_count);
         }
         else
         {
@@ -772,213 +765,336 @@ void umn_parse(__uint8_t *data)
         }
     } while (umn_kind_compare(pnode.token.kind, UMN_KIND_EOF) == 0);
 
-    struct UMN_PNode *curr = NULL, *prev, *next;
-    char oper_prec_level = 5; /* [brackets are handled seperately] unary_operators(5) functions(4), exponentiation(3), multiply/division(2) addition/subtraction(1) */
-    do                        /* do stuff */
-    {
-        for (size_t i = 0; i < node_stack->index; i++)
+    { /* do actual logic interpretting tokens and build a tree of the node-tokens*/
+        struct UMN_PNode *curr = NULL, *prev, *next;
+
+        /* this might not be the best way but i think it is cool */
+        /* have stack of (base index) and (end index) */
+        struct _base_end
         {
-            curr = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i));
-            prev = (i > 0) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i - 1))) : NULL;
-            next = ((i + 1) < node_stack->index) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + 1)))
-                                                 : NULL;
+            size_t base;
+            size_t end;
+            size_t set_end; /* used to calculate the stack has been shifted by */
+        };
 
-            /* for testing only care about operators */
-            if (!umn_kind_is_operator(curr->token.kind))
-            {
-                continue; /* only operators have a use */
-            }
+        struct UMN_Stack *be_stack = umn_stack_init(arena, 12 /* max depth */, sizeof(struct _base_end));
 
-            if (next == NULL)
+        size_t base = 0;
+
+        char oper_prec_level = 6; /* [brackets are handled seperately] unary_operators(3) functions(5), exponentiation(4), multiply/division(2) addition/subtraction(1) */
+        do                        /* do stuff */
+        {
+            size_t i;
+            for (i = base; i < node_stack->index; i++)
             {
-                if (curr->child_count > 0)
+                curr = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i));
+                prev = (i > base) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i - 1))) : NULL;
+                next = ((i + 1) < node_stack->index) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + 1)))
+                                                     : NULL;
+
+                /* before everything else deal with brackets ...*/
+                if (umn_kind_compare(curr->token.kind, UMN_KIND_OBRACKET) && oper_prec_level == 6) /* test for opening bracket */
                 {
-                    continue;
-                }
-                umn_parse_print_error(&tokeniser, curr->token);
-                fputs("umn_parse: token expected", stderr);
-                goto error_bad;
-            }
+                    /* somehow consume until it finds a closing bracket */
+                    /* recursion is not what i want to do ...*/
 
-            if (curr->child_count > 0 && umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR))
-            {
-                continue;
-            }
+                    /* TODO: do some error handling of this garbage */
+                    int depth = 1;
+                    size_t j;
 
-            /* detect situation where being a unary operator is suitable */
-            if (umn_kind_is(curr->token.kind, UMN_KIND_BF_UNARY) && oper_prec_level == 5 /* highest operator precedence level */)
-            {
-                /* pre reqs to treat operator as unary
-                    - first operator - 1
-                    - previous token is an unitialised operator 2 (* - 1)
-                 */
-                if (prev == NULL || (umn_kind_is(prev->token.kind, UMN_KIND_BF_OPERATOR) && prev->child_count == 0))
-                {
-                    /* handle unary '+' & '-' */
-                    /* check something according to some types of rules and do stuff skip for now */
-
-                    /* count how many minus and pluses there */
-                    int offset = 1;
-                    int minus_count = umn_kind_compare(curr->token.kind, UMN_KIND_SUB) ? 1 : 0;
-
-                    for (; (i + offset) < node_stack->index; offset++)
+                    for (j = i + 1; j < node_stack->index; j++)
                     {
-                        next = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + offset)));
+                        UMN_Kind kind = ((struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (j))))->token.kind;
 
-                        if (!umn_kind_is(next->token.kind, UMN_KIND_BF_UNARY))
+                        if (umn_kind_compare(kind, UMN_KIND_OBRACKET))
+                        {
+                            depth += 1;
+                        }
+                        else if (umn_kind_compare(kind, UMN_KIND_CBRACKET))
+                        {
+                            depth -= 1;
+                        }
+
+                        if (depth == 0)
                         {
                             break;
                         }
-
-                        minus_count += umn_kind_compare(next->token.kind, UMN_KIND_SUB) ? 1 : 0;
                     }
 
-                    /* check that the next token is not an unitialised operator */
-                    if (umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->child_count == 0)
-                    {
-                        umn_parse_print_error(&tokeniser, (struct UMN_Token){.kind = curr->token.kind, .begin = curr->token.begin, .end = next->token.end}); /* bad stuff */
-                        fputs("umn_parse: next token is invalid \n", stderr);
-                        goto error_bad;
-                    }
+                    /* TODO: do some error handling */
+                    assert(depth == 0); /**/
 
-                    if ((minus_count & 1) == 1)
+                    /* first move the bytes from i + 1 shift by 1 */
+
+                    memmove(/* shift the elements within the brackets back by one node */
+                            node_stack->data + (i)*node_stack->element_size,
+                            node_stack->data + ((i + 1) * node_stack->element_size),
+                            (node_stack->element_capacity * node_stack->element_size) - ((i + 1) * node_stack->element_size));
+
+                    j -= 1;
+
+                    memmove(/* shift the elements beyond the brackets back by one node */
+                            node_stack->data + (j)*node_stack->element_size,
+                            node_stack->data + ((j + 1) * node_stack->element_size),
+                            (node_stack->element_capacity * node_stack->element_size) - ((j + 1) * node_stack->element_size));
+
+                    node_stack->index -= 2; /* 2 elements were removed  */
+
+                    umn_stack_push(be_stack, &((struct _base_end){.base = base, .end = node_stack->index, .set_end = j}), NULL);
+                    node_stack->index = j;
+                    base = i;
+
+                    i -= 1;
+                    /* delete the brackets tokens from existance */
+                    continue;
+                }
+
+                /* lazy hack */
+                if (oper_prec_level == 6)
+                {
+                    continue;
+                }
+
+                /* for testing only care about operators */
+                if (!umn_kind_is_operator(curr->token.kind))
+                {
+                    continue; /* only operators have a use */
+                }
+
+                if (next == NULL)
+                {
+                    if (curr->child_count > 0)
                     {
-                        if (umn_kind_is(next->token.kind, UMN_KIND_BF_NUMERIC))
+                        continue;
+                    }
+                    umn_parse_print_error(&tokeniser, curr->token);
+                    fputs("umn_parse: token expected\n", stderr);
+                    goto error_bad;
+                }
+
+                if (curr->child_count > 0 && umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR))
+                {
+                    continue;
+                }
+
+                /* UNARY Hanlding, +-+-(a) ...   */
+                /* TODO: support nesting unary operators */
+                /* detect situation where being a unary operator is suitable */
+                if (umn_kind_is(curr->token.kind, UMN_KIND_BF_UNARY) && oper_prec_level == 3 /* highest operator precedence level */)
+                {
+                    /* pre reqs to treat operator as unary
+                        - first operator - 1
+                        - previous token is an unitialised operator 2 (* - 1)
+                     */
+                    if (prev == NULL || (umn_kind_is(prev->token.kind, UMN_KIND_BF_OPERATOR) && prev->child_count < 2))
+                    {
+                        /* handle unary '+' & '-' */
+                        /* check something according to some types of rules and do stuff skip for now */
+
+                        /* count how many minus and pluses there */
+                        int offset = 1;
+                        int minus_count = umn_kind_compare(curr->token.kind, UMN_KIND_SUB) ? 1 : 0;
+
+                        for (; (i + offset) < node_stack->index; offset++)
                         {
-                            next->token.value[0] *= -1; /* make value negative */
+                            next = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + offset)));
+
+                            if (!umn_kind_is(next->token.kind, UMN_KIND_BF_UNARY) || next->child_count > 0)
+                            {
+                                break;
+                            }
+
+                            minus_count += umn_kind_compare(next->token.kind, UMN_KIND_SUB) ? 1 : 0;
+                        }
+
+                        /* check that the next token is not an unitialised operator */
+                        if (umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->child_count == 0)
+                        {
+                            umn_parse_print_error(&tokeniser, (struct UMN_Token){.kind = curr->token.kind, .begin = curr->token.begin, .end = next->token.end}); /* bad stuff */
+                            fputs("umn_parse: next token is invalid \n", stderr);
+                            goto error_bad;
+                        }
+
+                        /*
+                            BELOW COMMENTED SECTION IS MULTIPLYING VALUE BY -1
+                        */
+
+                        // if ((minus_count & 1) == 1)
+                        // {
+                        //     if (umn_kind_is(next->token.kind, UMN_KIND_BF_NUMERIC))
+                        //     {
+                        //         next->token.value[0] *= -1; /* make value negative */
+                        //     }
+                        //     else
+                        //     {
+                        //         /* create a new node that is a multiplication of -1 * (next) */
+                        //         struct UMN_PNode *children = umn_arena_alloc(arena, sizeof(struct UMN_PNode) * 2);
+
+                        //         children->token.kind = UMN_KIND_INTEGER;
+                        //         children->token.value[0] = -1;
+
+                        //         memcpy(children + 1, next, sizeof(struct UMN_PNode)); /* copy the next value into the the next child */
+
+                        //         struct UMN_PNode mult_node = {
+                        //             .token = {.kind = UMN_KIND_MULT, .value = {(size_t)'*' /* this works due to little endian */, 0}, .begin = curr->token.begin, .end = next->token.end},
+                        //             .child_count = 2,
+                        //             .children = children};
+
+                        //         memcpy(next, &mult_node, sizeof(struct UMN_PNode));
+                        //     }
+                        // }
+
+                        // /* delete the first node and  shift stack back down */
+                        // memmove(node_stack->data + node_stack->element_size * i, node_stack->data + node_stack->element_size * (i + offset),
+                        //         (node_stack->element_capacity * node_stack->element_size) - ((i + offset) * node_stack->element_size));
+
+                        // node_stack->index -= offset;
+
+                        /*
+                            BELOW CREATE A UNARY OPERATION BY WRAPPING RESULTING TOKEN
+                        */
+
+                        { /* THIS IS DOING WHAT I WANTED TO AVOID CREATING INFORMATION */ 
+                            curr->token.kind = (minus_count & 1) == 1 ? UMN_KIND_SUB : UMN_KIND_ADD;                                                                                               /* modify token kind */
+                            curr->token.value[0] = (minus_count & 1) == 1 ? (size_t)'-' | ((size_t)'-' << ((sizeof(size_t) - 1) * 8)) : (size_t)'+' | ((size_t)'+' << ((sizeof(size_t) - 1) * 8)); /*  */
+                        }
+
+                        curr->child_count = 1;
+                        curr->children = umn_arena_alloc(arena, sizeof(struct UMN_PNode));
+                        memmove(curr->children, next, sizeof(struct UMN_PNode));
+
+                        /* remove the element immediatly after the series of unary operators */
+                        memmove(node_stack->data + node_stack->element_size * (i + 1), node_stack->data + node_stack->element_size * (i + offset + 1),
+                                (node_stack->element_capacity * node_stack->element_size) - ((i + offset) * node_stack->element_size));
+                        node_stack->index -= offset;
+
+                        continue;
+                    }
+                }
+
+                /* now comes the hard part deal with operator precedence */
+                if (oper_prec_level > UMN_KIND_OPERATOR_PREC_LEVEl(curr->token.kind))
+                {
+                    continue; /* touch this on the next pass */
+                }
+
+                if (prev == NULL)
+                {
+                    umn_parse_print_error(&tokeniser, curr->token);
+                    fputs("umn_parse: expected token before\n", stderr);
+
+                    // for (size_t i = 0; i < node_stack->index; i++)
+                    // {
+                    //     umn_parse_node_print(
+                    //         (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i)));
+                    //     // umn_token_print(
+                    //     //     ((struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i)))->token);
+                    // }
+                    goto error_bad;
+                }
+
+                /* small loop to collect children */
+                int offset_amount = 0;
+                child_stack->index = 0;
+                if (prev != NULL)
+                {
+                    offset_amount++; /* this is before the current index */
+                    assert(umn_stack_push(child_stack, prev, arena) == 0);
+                }
+
+                if (umn_kind_is(curr->token.kind, UMN_KIND_BF_COMMUTES))
+                { /* a known situation fix 1 * (-1 * a) */
+                    // puts("**** THERE ARE ASSUMPTIONS HERE THAT DO NOT WORK ****");
+
+                    /* The logic is such that if the previous node is the same operation as the previous append the node */
+
+                    for (size_t j = i + 1; j < node_stack->index; j++)
+                    {
+                        next = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * j));
+
+                        /* if the node is not an operation i.e variable or integer or either ..*/
+
+                        /* the thing that would allow a continue is an unitiialised operator of the same type */
+                        if (umn_kind_compare(curr->token.kind, next->token.kind))
+                        { /* the node is the same so a continue would be allowed otherwise break */
+                            offset_amount++;
+
+                            if (next->child_count >= 2)
+                            { /* loop through the children of the node */
+                                for (size_t k = 0; k < next->child_count; k++)
+                                {
+                                    assert(umn_stack_push(child_stack, (next->children + k), arena) == 0);
+                                }
+                            }
+                        }
+                        else if (umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->child_count == 0)
+                        {
+                            break; /* quit ecountered an uninitialised operater of a different kind */
                         }
                         else
                         {
-                            /* create a new node that is a multiplication of -1 * (next) */
-                            struct UMN_PNode *children = umn_arena_alloc(arena, sizeof(struct UMN_PNode) * 2);
-
-                            children->token.kind = UMN_KIND_INTEGER;
-                            children->token.value[0] = -1;
-
-                            memcpy(children + 1, next, sizeof(struct UMN_PNode)); /* copy the next value into the the next child */
-
-                            struct UMN_PNode mult_node = {
-                                .token = {.kind = UMN_KIND_MULT, .value = {(size_t)'*' /* this works due to little endian */, 0}, .begin = curr->token.begin, .end = next->token.end},
-                                .child_count = 2,
-                                .children = children};
-
-                            memcpy(next, &mult_node, sizeof(struct UMN_PNode));
+                            assert(umn_stack_push(child_stack, next, arena) == 0);
+                            offset_amount++;
                         }
                     }
-
-                    /* delete the first node and  shift stack back down */
-                    memmove(node_stack->data + node_stack->element_size * i, node_stack->data + node_stack->element_size * (i + offset),
-                            (node_stack->element_capacity * node_stack->element_size) - ((i + offset) * node_stack->element_size));
-
-                    node_stack->index -= offset;
-
-                    continue;
                 }
-            }
-
-            if (prev == NULL)
-            {
-                umn_parse_print_error(&tokeniser, curr->token);
-                fputs("umn_parse: expected token before", stderr);
-                goto error_bad;
-            }
-
-            /* now comes the hard part deal with operator precedence */
-            if (oper_prec_level > UMN_KIND_OPERATOR_PREC_LEVEl(curr->token.kind))
-            {
-                continue; /* touch this on the next pass */
-            }
-
-            /* small loop to collect children */
-            int offset_amount = 0;
-            child_stack->index = 0;
-            if (prev != NULL)
-            {
-                offset_amount++; /* this is before the current index */
-                assert(umn_stack_push(child_stack, prev, arena) == 0);
-            }
-
-            if (umn_kind_is(curr->token.kind, UMN_KIND_BF_COMMUTES))
-            { /* a known situation fix 1 * (-1 * a) */
-
-                for (size_t j = i + 1; j < node_stack->index; j++)
+                else
                 {
-                    next = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * j));
-
-                    // printf("child stack  index = %zu,", child_stack->index);
-                    // printf("node stack index = %zu oper_prec = %d, ", node_stack->index, oper_prec_level);
-                    // umn_parse_node_print(curr);
-
-                    if (!umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) || (!umn_kind_compare(next->token.kind, curr->token.kind) && next->child_count))
-                    {
-                        assert(umn_stack_push(child_stack, next, arena) == 0);
-                        offset_amount++;
-                        continue;
-                    }
-
-                    if (!umn_kind_compare(next->token.kind, curr->token.kind))
-                    {
-                        umn_parse_print_error(&tokeniser, (struct UMN_Token){.begin = curr->token.begin, .end = next->token.end});
-                        fputs("umn_parse: unexpected token #956-43243", stderr);
-                        goto error_bad;
-                    }
-
+                    assert(umn_stack_push(child_stack, next, arena) == 0);
                     offset_amount++;
-                    if (next->child_count > 0)
-                    {
-                        /* loop through the children of the node */
-                        for (size_t k = 0; k < next->child_count; k++)
-                        {
-                            assert(umn_stack_push(child_stack, (next->children + k), arena) == 0);
-                        }
-                    }
-
-                    /* there is probably a logical error somewhere */
                 }
+
+                curr->child_count = child_stack->index;
+                curr->children = umn_arena_alloc(arena, sizeof(struct UMN_PNode) * curr->child_count);
+
+                { /* modify stack by removing children from stack and shifting nodes backwards */
+                    int elements_to_shift_by = offset_amount;
+
+                    // printf("stack index = %zu, offset_amount = %d\n", node_stack->index, offset_amount);
+                    // printf("child count = %zu\n", child_stack->index);
+
+                    memcpy(curr->children, child_stack->data, sizeof(struct UMN_PNode) * curr->child_count);
+
+                    /* Do some array modificiations so the stack is happy */
+
+                    /* check if there are bytes to copy back */
+
+                    memcpy(&pnode, curr, (sizeof(struct UMN_PNode)));
+
+                    memmove(
+                        node_stack->data + (i)*node_stack->element_size,
+                        node_stack->data + ((i + elements_to_shift_by) * node_stack->element_size),
+                        (node_stack->element_capacity * node_stack->element_size) - ((i + elements_to_shift_by) * node_stack->element_size));
+
+                    /* move stack index back by 2 */
+
+                    node_stack->index -= elements_to_shift_by;
+
+                    memcpy(node_stack->data + (i - 1) * node_stack->element_size, &pnode, (sizeof(struct UMN_PNode)));
+                }
+
+                // umn_parse_node_print(&pnode);
+                // printf("stack index = %zu\n", node_stack->index);
+
+                i -= 1; /* move index back to rectify that the stack has been m modified */
             }
-            else
+
+            if (oper_prec_level == 1 && be_stack->index)
             {
-                offset_amount++;
-                assert(umn_stack_push(child_stack, next, arena) == 0);
+                struct _base_end be = {0};
+                assert(umn_stack_pop(be_stack, &be) == 0); /* pop from be_stack */
+
+                /* set values this is going to off due to the fact that the brackets exist and take up space */
+                base = be.base;
+                node_stack->index = be.end - (be.set_end - node_stack->index);
+
+                oper_prec_level = 6 + 1;
             }
 
-            curr->child_count = child_stack->index;
-            curr->children = umn_arena_alloc(arena, sizeof(struct UMN_PNode) * curr->child_count);
+        } while (--oper_prec_level > 0);
+    }
 
-            { /* modify stack by removing children from stack and shifting nodes backwards */
-                int elements_to_shift_by = offset_amount;
-
-                // printf("stack index = %zu, offset_amount = %d\n", node_stack->index, offset_amount);
-                // printf("child count = %zu\n", child_stack->index);
-
-                memcpy(curr->children, child_stack->data, sizeof(struct UMN_PNode) * curr->child_count);
-
-                /* Do some array modificiations so the stack is happy */
-
-                /* check if there are bytes to copy back */
-
-                memcpy(&pnode, curr, (sizeof(struct UMN_PNode)));
-
-                memmove(
-                    node_stack->data + (i)*node_stack->element_size,
-                    node_stack->data + ((i + elements_to_shift_by) * node_stack->element_size),
-                    (node_stack->element_capacity * node_stack->element_size) - ((i + elements_to_shift_by) * node_stack->element_size));
-
-                /* move stack index back by 2 */
-
-                node_stack->index -= elements_to_shift_by;
-
-                memcpy(node_stack->data + (i - 1) * node_stack->element_size, &pnode, (sizeof(struct UMN_PNode)));
-            }
-
-            // umn_parse_node_print(&pnode);
-            // printf("stack index = %zu\n", node_stack->index);
-
-            i -= 1; /* move index back to rectify that the stack has been m modified */
-        }
-    } while (--oper_prec_level > 0);
-
-    // putchar('\n');
+    putchar('\n');
     for (size_t i = 0; i < node_stack->index; i++)
     {
         umn_parse_node_print(

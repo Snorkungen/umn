@@ -601,9 +601,14 @@ int main(int argc, char **argv)
     /* "0xa - (-0b11) = 13a_0o71öl_pastej∑" */
     // umn_parse("2 + 1 *4 + a");
 
-    umn_parse("1 * -+-a * 1 * 2 - 1");
-    puts("------------------");
-    umn_parse("--a / 1 * - 1");
+    // umn_parse("1 * -+-a * 1 * 2 - 1");
+    // puts("------------------");
+    // umn_parse("--a / 1 * - 1");
+    // puts("------------------");
+    // umn_parse("1 * (a - b) + 1 + -a**2");
+
+    umn_parse("(1 - --(1 + 1) * 2) + 2"); /* does not work */
+    
     return 0; /* Ignore the below program seg faults fvalues points to a bad pointer */
     void *arena = marena_init();
 
