@@ -607,7 +607,9 @@ int main(int argc, char **argv)
     // puts("------------------");
     // umn_parse("1 * (a - b) + 1 + -a**2");
 
-    umn_parse("(1 - --(1 + 1) * 2) + 2"); /* does not work */
+    // umn_parse("(1 + (a- 1) * (b - 1)) * (a)"); 
+    umn_parse("1 + (a * (b - 1) * (c - 1))");
+    umn_parse("(a + b) * (a ** (b - 1)) - -(a - b)");
     
     return 0; /* Ignore the below program seg faults fvalues points to a bad pointer */
     void *arena = marena_init();

@@ -163,7 +163,8 @@ struct UMN_Stack
 {
     void *data; /* backing memory allocation */
 
-    size_t index; /* stack pointer */
+    int direction; /* 1 if stack grows upwards, -1 stack grows downward */
+    size_t index;  /* stack pointer */
     size_t element_capacity;
     size_t element_size;
 };
@@ -184,6 +185,7 @@ umn_stack_init(struct UMN_Arena *arena, size_t element_capacity, size_t element_
     /* set the stack member values */
     stack->data = (void *)stack + sizeof(struct UMN_Stack);
 
+    stack->direction = 1;
     stack->element_capacity = element_capacity;
     stack->element_size = element_size;
     stack->index = 0;
@@ -213,8 +215,8 @@ int umn_stack_push(struct UMN_Stack *stack, void *src_element, struct UMN_Arena 
 
     /* memmove data into the stack */
     memmove(
-        ((void *)stack->data + (stack->index * stack->element_size)), /* destination */
-        src_element,                                                  /* source */
+        ((void *)stack->data + (stack->index * stack->element_size) * stack->direction), /* destination */
+        src_element,                                                                     /* source */
         stack->element_size);
 
     /* increment index */
@@ -242,32 +244,46 @@ int umn_stack_pop(struct UMN_Stack *stack, void *dest_element)
 
     /* read from index position into element */
     memmove(
-        dest_element,                                                 /* destination */
-        ((void *)stack->data + (stack->index * stack->element_size)), /* source */
+        dest_element,                                                                    /* destination */
+        ((void *)stack->data + (stack->index * stack->element_size) * stack->direction), /* source */
         stack->element_size);
 
     return 0;
 }
 
-/* @return 0 = success, -1 = fail */
-int umn_stack_peek(struct UMN_Stack *stack, void *dest_element, size_t ncount)
+/* inplace reverse the direction that the stack goes in
+    @return 0 = success, -1 = fail
+*/
+int umn_stack_reverse(struct UMN_Stack *stack)
 {
-    if (stack == NULL || dest_element == NULL)
-    {
-        return -1; /* bad parameters */
-    }
-
-    /* check that stack has enough elements to peek so far back */
-    if (ncount > stack->index)
+    if (stack == NULL)
     {
         return -1;
     }
 
-    /* read from index position into element */
-    memmove(
-        dest_element,                                                            /* destination */
-        ((void *)stack->data + ((stack->index - ncount) * stack->element_size)), /* source */
-        stack->element_size);
+    stack->direction *= -1;
+    /* capacity remains the same but the data is moved */
+    int data_move_amount;
+    if (stack->direction < 0)
+    {
+        /* move data to the right (upward) */
+        memmove(
+            /* the destination is data + (capacity - index + 1)*/
+            stack->data + stack->element_size * (stack->element_capacity - (stack->index)),
+            stack->data,
+            stack->element_size * stack->index);
+
+        stack->data = stack->data + (stack->element_size * (stack->element_capacity - 1));
+    }
+    else
+    {
+        /* move data to the left (down ward)*/
+        stack->data = stack->data - (stack->element_size * (stack->element_capacity - 1));
+        memmove(
+            stack->data,
+            stack->data + stack->element_size * (stack->element_capacity - (stack->index)),
+            stack->element_size * (stack->index ));
+    }
 
     return 0;
 }

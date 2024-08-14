@@ -728,6 +728,17 @@ void umn_parse(__uint8_t *data)
     struct UMN_Stack *child_stack = umn_stack_init(arena, 10, sizeof(struct UMN_PNode));
     assert(child_stack != NULL);
 
+    /* keep a record of the stack base and end for a bracket pair */
+    struct UMN_Bracket_Location
+    {
+        size_t begin;
+        size_t end;
+        size_t depth;
+    };
+    struct UMN_Stack *bracket_stack = umn_stack_init(arena, 10 /* maximum bracket depth */, sizeof(struct UMN_Bracket_Location));
+    struct UMN_Bracket_Location bracket_location = {0};
+    struct UMN_Stack *bracket_begin_stack = umn_stack_init(arena, bracket_stack->element_capacity, sizeof(size_t));
+
     struct UMN_PNode pnode = {};
 
     /* approach from <https://github.com/Snorkungen/expression/blob/master/expression_tree_builder2.py> */
@@ -751,7 +762,25 @@ void umn_parse(__uint8_t *data)
             break;
         }
 
-        // (umn_stack_peek(node_stack, &prev_node, 1) /* true if failed to read previous node */ || umn_kind_is_operator(prev_node.token.kind))
+        /* this does not handle nesting ...*/
+        if (umn_kind_compare(pnode.token.kind, UMN_KIND_OBRACKET))
+        {
+            /* save the current stack index */
+            bracket_location.begin = node_stack->index;
+            umn_stack_push(bracket_begin_stack, &bracket_location.begin, NULL);
+            continue;
+        }
+        else if (umn_kind_compare(pnode.token.kind, UMN_KIND_CBRACKET))
+        {
+            /* fetch the opening bracket and push the current stack index */
+            assert(umn_stack_pop(bracket_begin_stack, &bracket_location.begin) == 0);
+
+            bracket_location.depth = bracket_begin_stack->index + 1;
+
+            bracket_location.end = node_stack->index;
+            umn_stack_push(bracket_stack, &bracket_location, NULL);
+            continue;
+        }
 
         /* push node onto stack */
         if (umn_stack_push(node_stack, &pnode, NULL))
@@ -765,24 +794,43 @@ void umn_parse(__uint8_t *data)
         }
     } while (umn_kind_compare(pnode.token.kind, UMN_KIND_EOF) == 0);
 
+    /* include the entire expression */
+    bracket_location.begin = 0;
+    bracket_location.end = node_stack->index;
+    bracket_location.depth = 0;
+    umn_stack_push(bracket_stack, &bracket_location, NULL);
+
+    struct UMN_PNode *curr = NULL, *prev, *next;
+
+    size_t base = 0;
+    size_t prev_depth = 0;
+
+    /* assume the values are zero */
+    int *delete_array = umn_arena_alloc(arena, sizeof(int) * (bracket_stack->element_capacity + 1));
+    memset(delete_array, 0, sizeof(int) * (bracket_stack->element_capacity + 1));
+
+    umn_stack_reverse(bracket_stack);
+    while (umn_stack_pop(bracket_stack, &bracket_location) == 0)
     { /* do actual logic interpretting tokens and build a tree of the node-tokens*/
-        struct UMN_PNode *curr = NULL, *prev, *next;
 
-        /* this might not be the best way but i think it is cool */
-        /* have stack of (base index) and (end index) */
-        struct _base_end
+        /* get the delete sum ... */
+        int delete_sum = 0;
+        for (size_t i = 0; i <= bracket_location.depth; i++)
         {
-            size_t base;
-            size_t end;
-            size_t set_end; /* used to calculate the stack has been shifted by */
-        };
+            delete_sum += delete_array[i];
+        }
 
-        struct UMN_Stack *be_stack = umn_stack_init(arena, 12 /* max depth */, sizeof(struct _base_end));
+        base = bracket_location.begin - delete_sum;
+        node_stack->index = bracket_location.end - delete_sum;
 
-        size_t base = 0;
+        if (bracket_location.depth < prev_depth)
+        {
+            node_stack->index -= delete_array[prev_depth];
+            delete_array[prev_depth] = 0;
+        }
 
         char oper_prec_level = 6; /* [brackets are handled seperately] unary_operators(3) functions(5), exponentiation(4), multiply/division(2) addition/subtraction(1) */
-        do                        /* do stuff */
+        while (--oper_prec_level > 0)
         {
             size_t i;
             for (i = base; i < node_stack->index; i++)
@@ -791,69 +839,6 @@ void umn_parse(__uint8_t *data)
                 prev = (i > base) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i - 1))) : NULL;
                 next = ((i + 1) < node_stack->index) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + 1)))
                                                      : NULL;
-
-                /* before everything else deal with brackets ...*/
-                if (umn_kind_compare(curr->token.kind, UMN_KIND_OBRACKET) && oper_prec_level == 6) /* test for opening bracket */
-                {
-                    /* somehow consume until it finds a closing bracket */
-                    /* recursion is not what i want to do ...*/
-
-                    /* TODO: do some error handling of this garbage */
-                    int depth = 1;
-                    size_t j;
-
-                    for (j = i + 1; j < node_stack->index; j++)
-                    {
-                        UMN_Kind kind = ((struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (j))))->token.kind;
-
-                        if (umn_kind_compare(kind, UMN_KIND_OBRACKET))
-                        {
-                            depth += 1;
-                        }
-                        else if (umn_kind_compare(kind, UMN_KIND_CBRACKET))
-                        {
-                            depth -= 1;
-                        }
-
-                        if (depth == 0)
-                        {
-                            break;
-                        }
-                    }
-
-                    /* TODO: do some error handling */
-                    assert(depth == 0); /**/
-
-                    /* first move the bytes from i + 1 shift by 1 */
-
-                    memmove(/* shift the elements within the brackets back by one node */
-                            node_stack->data + (i)*node_stack->element_size,
-                            node_stack->data + ((i + 1) * node_stack->element_size),
-                            (node_stack->element_capacity * node_stack->element_size) - ((i + 1) * node_stack->element_size));
-
-                    j -= 1;
-
-                    memmove(/* shift the elements beyond the brackets back by one node */
-                            node_stack->data + (j)*node_stack->element_size,
-                            node_stack->data + ((j + 1) * node_stack->element_size),
-                            (node_stack->element_capacity * node_stack->element_size) - ((j + 1) * node_stack->element_size));
-
-                    node_stack->index -= 2; /* 2 elements were removed  */
-
-                    umn_stack_push(be_stack, &((struct _base_end){.base = base, .end = node_stack->index, .set_end = j}), NULL);
-                    node_stack->index = j;
-                    base = i;
-
-                    i -= 1;
-                    /* delete the brackets tokens from existance */
-                    continue;
-                }
-
-                /* lazy hack */
-                if (oper_prec_level == 6)
-                {
-                    continue;
-                }
 
                 /* for testing only care about operators */
                 if (!umn_kind_is_operator(curr->token.kind))
@@ -954,7 +939,7 @@ void umn_parse(__uint8_t *data)
                             BELOW CREATE A UNARY OPERATION BY WRAPPING RESULTING TOKEN
                         */
 
-                        { /* THIS IS DOING WHAT I WANTED TO AVOID CREATING INFORMATION */ 
+                        {                                                                                                                                                                          /* THIS IS DOING WHAT I WANTED TO AVOID CREATING INFORMATION */
                             curr->token.kind = (minus_count & 1) == 1 ? UMN_KIND_SUB : UMN_KIND_ADD;                                                                                               /* modify token kind */
                             curr->token.value[0] = (minus_count & 1) == 1 ? (size_t)'-' | ((size_t)'-' << ((sizeof(size_t) - 1) * 8)) : (size_t)'+' | ((size_t)'+' << ((sizeof(size_t) - 1) * 8)); /*  */
                         }
@@ -1078,20 +1063,10 @@ void umn_parse(__uint8_t *data)
 
                 i -= 1; /* move index back to rectify that the stack has been m modified */
             }
+        };
 
-            if (oper_prec_level == 1 && be_stack->index)
-            {
-                struct _base_end be = {0};
-                assert(umn_stack_pop(be_stack, &be) == 0); /* pop from be_stack */
-
-                /* set values this is going to off due to the fact that the brackets exist and take up space */
-                base = be.base;
-                node_stack->index = be.end - (be.set_end - node_stack->index);
-
-                oper_prec_level = 6 + 1;
-            }
-
-        } while (--oper_prec_level > 0);
+        delete_array[bracket_location.depth] += (bracket_location.end - bracket_location.begin) - (node_stack->index - base);
+        prev_depth = bracket_location.depth;
     }
 
     putchar('\n');
