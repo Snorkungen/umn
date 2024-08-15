@@ -43,10 +43,12 @@ typedef size_t UMN_Kind;
 #define UMN_KIND_BF_VARIABLE (0x80UL << (5 * 8))
 #define UMN_KIND_BF_COMMUTES (0x40UL << (5 * 8)) /* Operation has the commutative property */
 #define UMN_KIND_BF_UNARY (0x20UL << (5 * 8))
+#define UMN_KIND_BF_FUNCTION (0x10UL << (5 * 8)) /* the keyword is a function ... */
 
 /* define a macro that would allow the usage of the stuff as integer constants */
 #define UMN_KIND_CREATE_DATA(DATA) ((size_t)(DATA) << (7 * 8))
 #define UMN_KIND_CREATE_KWORD(DATA) (UMN_KIND_CREATE_DATA(DATA) | UMN_KIND_BF_LITERAL | UMN_KIND_BF_KEYWORD)
+#define UMN_KIND_CREATE_FUNC(DATA) (UMN_KIND_CREATE_KWORD(DATA) | UMN_KIND_BF_FUNCTION)
 
 #define UMN_KIND_CREATE_OPERATOR(DATA, PREC_LEVEL) (UMN_KIND_CREATE_DATA(((DATA) << 3) | ((PREC_LEVEL) & 0x07)) | UMN_KIND_BF_LITERAL | UMN_KIND_BF_KEYWORD | UMN_KIND_BF_OPERATOR)
 #define UMN_KIND_OPERATOR_PREC_LEVEl(KIND) ((char)((KIND) >> (7 * 8)) & (0x07)) /* the needed data is in the bottom 3 bits*/
@@ -64,6 +66,7 @@ typedef size_t UMN_Kind;
 #define UMN_KIND_EQUALS UMN_KIND_CREATE_KWORD(6)
 #define UMN_KIND_OBRACKET UMN_KIND_CREATE_KWORD(7) /* Opening bracket "(" */
 #define UMN_KIND_CBRACKET UMN_KIND_CREATE_KWORD(8) /* Closing bracket ")" */
+#define UMN_KIND_COMMA UMN_KIND_CREATE_KWORD(9)
 
 /* for simplicity just do the straight forward thing, same as i have done previously */
 
@@ -105,7 +108,7 @@ struct UMN_Keyword
     const __uint8_t name[16];
 };
 
-#define UMN_KWORD_COUNT 8
+#define UMN_KWORD_COUNT 10
 #define UMN_CREATE_KWORD(KIND, NAME) {.kind = (KIND), .size = sizeof(NAME) - 1 /* remove null byte from size */, .name = NAME}
 
 static struct UMN_Keyword UMN_keywords[] = {
@@ -118,6 +121,9 @@ static struct UMN_Keyword UMN_keywords[] = {
     UMN_CREATE_KWORD(UMN_KIND_OBRACKET, "("),
     UMN_CREATE_KWORD(UMN_KIND_CBRACKET, ")"),
     UMN_CREATE_KWORD(UMN_KIND_EQUALS, "="),
+    UMN_CREATE_KWORD(UMN_KIND_COMMA, ","),
+
+    UMN_CREATE_KWORD(UMN_KIND_CREATE_FUNC(1), "testf"),
 };
 
 struct UMN_tokeniser
@@ -561,6 +567,9 @@ static inline void umn_token_print(struct UMN_Token token)
     case UMN_KIND_CBRACKET:
         s = "UMN_KIND_CBRACKET";
         break;
+    case UMN_KIND_COMMA:
+        s = "UMN_KIND_COMMA";
+        break;
     }
 
     if (umn_kind_compare(token.kind, UMN_KIND_INTEGER))
@@ -570,6 +579,10 @@ static inline void umn_token_print(struct UMN_Token token)
     else if (umn_kind_compare(token.kind, UMN_KIND_FRACTION))
     {
         printf("Token.kind = %s, Token.value_float = %f, Token.begin = %zu, Token.end = %zu\n", s, (double)token.value[0] / token.value[1], token.begin, token.end);
+    }
+    else if (umn_kind_is(token.kind, UMN_KIND_BF_FUNCTION))
+    {
+        s = "UMN_KIND_FUNCTION";
     }
     else
     {
@@ -644,6 +657,32 @@ int umn_parse_node_to_string(__uint8_t *s, size_t max_len, struct UMN_PNode *pno
     else if (pnode->child_count == 0)
     {
         n += snprintf(s + n, max_len - n, "%s", (char *)(pnode->token.value));
+    }
+    else if (umn_kind_is(pnode->token.kind, UMN_KIND_BF_FUNCTION))
+    {
+        assert(pnode->children);
+
+        n += snprintf(s + n, max_len - n, "%s", (char *)(pnode->token.value));
+
+        if ((max_len - n) > 1)
+        {
+            s[n++] = '(';
+        }
+
+        for (size_t i = 0; i < pnode->child_count && (max_len - n) > 1; i++)
+        {
+            if (i > 0 && (max_len - n) > 2)
+            {
+                s[n++] = ',';
+                s[n++] = ' ';
+            }
+            n += umn_parse_node_to_string(s + n, max_len - n, pnode->children + i, 0);
+        }
+
+        if ((max_len - n) > 1)
+        {
+            s[n++] = ')';
+        }
     }
     else
     {
@@ -840,6 +879,58 @@ void umn_parse(__uint8_t *data)
                 next = ((i + 1) < node_stack->index) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + 1)))
                                                      : NULL;
 
+                if (umn_kind_is(curr->token.kind, UMN_KIND_BF_FUNCTION) && oper_prec_level == 5)
+                {
+                    /* What this think does not support functions given no arguments */
+                    /* There might be a flaw since the logic does not know what brackets are */
+                    /* read the next node if there is not a COMMA to seperate the there are problems */
+
+                    if (next == NULL || (umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->children == 0))
+                    {
+                        umn_parse_print_error(&tokeniser, curr->token);
+                        fputs("umn_parse: value expected #861\n", stderr);
+                        goto error_bad;
+                    }
+
+                    int elements_to_shift_by = 0;
+                    child_stack->index = 0;
+                    for (size_t j = i + 1; j < node_stack->index; j++)
+                    {
+                        next = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * j * node_stack->direction));
+
+                        if ((umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->children == 0))
+                        {
+                            break;
+                        }
+
+                        elements_to_shift_by++;
+
+                        if (umn_kind_compare(next->token.kind, UMN_KIND_COMMA))
+                        {
+                            continue;
+                        }
+
+                        umn_stack_push(child_stack, next, arena);
+                    }
+
+                    /* the shifting of values should actually be a function */
+                    {
+                        curr->child_count = child_stack->index;
+                        curr->children = umn_arena_alloc(arena, (sizeof(struct UMN_PNode) * curr->child_count));
+
+                        memcpy(curr->children, child_stack->data, sizeof(struct UMN_PNode) * curr->child_count);
+
+                        memmove(
+                            node_stack->data + ((i + 1) * node_stack->element_size),
+                            node_stack->data + ((i + elements_to_shift_by + 1) * node_stack->element_size),
+                            (node_stack->element_capacity * node_stack->element_size) - ((i + elements_to_shift_by + 1) * node_stack->element_size));
+
+                        node_stack->index -= elements_to_shift_by;
+                    }
+
+                    continue;
+                }
+
                 /* for testing only care about operators */
                 if (!umn_kind_is_operator(curr->token.kind))
                 {
@@ -989,7 +1080,6 @@ void umn_parse(__uint8_t *data)
 
                 if (umn_kind_is(curr->token.kind, UMN_KIND_BF_COMMUTES))
                 { /* a known situation fix 1 * (-1 * a) */
-                    // puts("**** THERE ARE ASSUMPTIONS HERE THAT DO NOT WORK ****");
 
                     /* The logic is such that if the previous node is the same operation as the previous append the node */
 
