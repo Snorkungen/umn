@@ -892,6 +892,9 @@ void umn_parse(__uint8_t *data)
                         goto error_bad;
                     }
 
+                    /* this is dumb ... */
+                    struct UMN_Stack *nested_func_stack = umn_stack_init(arena, node_stack->index, sizeof(size_t));
+
                     int elements_to_shift_by = 0;
                     child_stack->index = 0;
                     for (size_t j = i + 1; j < node_stack->index; j++)
@@ -911,6 +914,39 @@ void umn_parse(__uint8_t *data)
                         }
 
                         umn_stack_push(child_stack, next, arena);
+
+                        if (umn_kind_is(next->token.kind, UMN_KIND_BF_FUNCTION))
+                        {
+                            assert(umn_stack_push(nested_func_stack, &child_stack->index, NULL) == 0);
+                        }
+                    }
+
+                    size_t nfs_val = 0;
+                    while (umn_stack_pop(nested_func_stack, &nfs_val) == 0 && nfs_val > 0)
+                    {
+                        /* validate that the nested function has arguments ... */
+                        if (nfs_val == child_stack->index)
+                        {
+                            umn_parse_print_error(&tokeniser, ((struct UMN_PNode *)(child_stack->data + child_stack->element_size * (nfs_val - 1)))->token);
+                            fputs("umn_parse: value expected #934\n", stderr);
+                            goto error_bad;
+                        }
+
+                        /* assigne next to the nested function that is being processed */
+                        next = (struct UMN_PNode *)(child_stack->data + child_stack->element_size * (nfs_val - 1));
+                        
+                        if (next->child_count) {
+                            continue; /* function already has children ignore */
+                        }
+
+                        next->child_count = child_stack->index - nfs_val;
+                        next->children = umn_arena_alloc(arena, (sizeof(struct UMN_PNode) * next->child_count));
+
+                        memcpy(next->children,
+                               child_stack->data + (child_stack->element_size * nfs_val),
+                               child_stack->element_size * next->child_count);
+                        
+                        child_stack->index -= next->child_count;
                     }
 
                     /* the shifting of values should actually be a function */

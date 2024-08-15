@@ -610,7 +610,8 @@ int main(int argc, char **argv)
     
     umn_parse("a + testf(2 + 2)");
     umn_parse("a + testf(2, b * (2 - a)) + 2");
-    umn_parse("testf testf( a -b) + 2");
+    umn_parse("testf testf( a -b, c), d + 2"); /* expected: testf(testf(a - b, c, d)) */
+    umn_parse("testf testf( a -b, testf(c)), d + 2"); /* expected: testf(testf(a - b, testf(c), d)) */
 
 
 
