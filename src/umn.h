@@ -572,6 +572,11 @@ static inline void umn_token_print(struct UMN_Token token)
         break;
     }
 
+    if (umn_kind_is(token.kind, UMN_KIND_BF_FUNCTION))
+    {
+        s = "UMN_KIND_FUNCTION";
+    }
+
     if (umn_kind_compare(token.kind, UMN_KIND_INTEGER))
     {
         printf("Token.kind = %s, Token.value_int = %ld, Token.begin = %zu, Token.end = %zu\n", s, token.value[0], token.begin, token.end);
@@ -579,10 +584,6 @@ static inline void umn_token_print(struct UMN_Token token)
     else if (umn_kind_compare(token.kind, UMN_KIND_FRACTION))
     {
         printf("Token.kind = %s, Token.value_float = %f, Token.begin = %zu, Token.end = %zu\n", s, (double)token.value[0] / token.value[1], token.begin, token.end);
-    }
-    else if (umn_kind_is(token.kind, UMN_KIND_BF_FUNCTION))
-    {
-        s = "UMN_KIND_FUNCTION";
     }
     else
     {
@@ -773,6 +774,7 @@ void umn_parse(__uint8_t *data)
         size_t begin;
         size_t end;
         size_t depth;
+        size_t hack; /* if the bracket location is set by further down parsing logic */
     };
     struct UMN_Stack *bracket_stack = umn_stack_init(arena, 10 /* maximum bracket depth */, sizeof(struct UMN_Bracket_Location));
     struct UMN_Bracket_Location bracket_location = {0};
@@ -868,6 +870,19 @@ void umn_parse(__uint8_t *data)
             delete_array[prev_depth] = 0;
         }
 
+        /* func(a, b) => (func(a, b)) */
+        /* done to prevent oddities such as func "(func a, b), c" being understood as "func(func(a, b, c))" */
+        if (base > 0 && bracket_location.hack == 0)
+        {
+            struct UMN_PNode *prec_node = (struct UMN_PNode *)(node_stack->data + (base - 1) * node_stack->element_size);
+            if (umn_kind_is(prec_node->token.kind, UMN_KIND_BF_FUNCTION) && prec_node->child_count == 0)
+            {
+                /* push a new bracket location that includes the function  */
+                struct UMN_Bracket_Location temp_bl = {.begin = bracket_location.begin - 1, .end = bracket_location.end, .depth = bracket_location.depth++, .hack = 1};
+                umn_stack_push(bracket_stack, &temp_bl, NULL); 
+            }
+        }
+
         char oper_prec_level = 6; /* [brackets are handled seperately] unary_operators(3) functions(5), exponentiation(4), multiply/division(2) addition/subtraction(1) */
         while (--oper_prec_level > 0)
         {
@@ -879,7 +894,7 @@ void umn_parse(__uint8_t *data)
                 next = ((i + 1) < node_stack->index) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + 1)))
                                                      : NULL;
 
-                if (umn_kind_is(curr->token.kind, UMN_KIND_BF_FUNCTION) && oper_prec_level == 5)
+                if (umn_kind_is(curr->token.kind, UMN_KIND_BF_FUNCTION) && curr->child_count == 0 && oper_prec_level == 5)
                 {
                     /* What this think does not support functions given no arguments */
                     /* There might be a flaw since the logic does not know what brackets are */
@@ -892,33 +907,46 @@ void umn_parse(__uint8_t *data)
                         goto error_bad;
                     }
 
-                    /* this is dumb ... */
+                    /* this is dumb ... deals with stuff like "func d, func a, b, c" to be read as "func(d, func(a, b, c))" */
                     struct UMN_Stack *nested_func_stack = umn_stack_init(arena, node_stack->index, sizeof(size_t));
 
-                    int elements_to_shift_by = 0;
+                    int elements_to_shift_by = 0, value_expected = 1;
                     child_stack->index = 0;
+
                     for (size_t j = i + 1; j < node_stack->index; j++)
                     {
                         next = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * j * node_stack->direction));
 
-                        if ((umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->children == 0))
+                        if (value_expected == 1)
                         {
-                            break;
+                            /* check that the value is valid */
+                            if (umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->children == 0)
+                            {
+                                break; /* i think this would actually should be an error */
+                            }
+
+                            umn_stack_push(child_stack, next, arena);
+
+                            if (umn_kind_is(next->token.kind, UMN_KIND_BF_FUNCTION) && next->child_count == 0)
+                            {
+                                assert(umn_stack_push(nested_func_stack, &child_stack->index, NULL) == 0);
+                            }
+                            else
+                            {
+                                value_expected = 0;
+                            }
+                        }
+                        else if (value_expected == 0)
+                        {
+                            if (!umn_kind_compare(next->token.kind, UMN_KIND_COMMA))
+                            {
+                                break; /* comma is the only value expected */
+                            }
+
+                            value_expected = 1;
                         }
 
                         elements_to_shift_by++;
-
-                        if (umn_kind_compare(next->token.kind, UMN_KIND_COMMA))
-                        {
-                            continue;
-                        }
-
-                        umn_stack_push(child_stack, next, arena);
-
-                        if (umn_kind_is(next->token.kind, UMN_KIND_BF_FUNCTION))
-                        {
-                            assert(umn_stack_push(nested_func_stack, &child_stack->index, NULL) == 0);
-                        }
                     }
 
                     size_t nfs_val = 0;
@@ -934,8 +962,9 @@ void umn_parse(__uint8_t *data)
 
                         /* assigne next to the nested function that is being processed */
                         next = (struct UMN_PNode *)(child_stack->data + child_stack->element_size * (nfs_val - 1));
-                        
-                        if (next->child_count) {
+
+                        if (next->child_count)
+                        {
                             continue; /* function already has children ignore */
                         }
 
@@ -945,7 +974,7 @@ void umn_parse(__uint8_t *data)
                         memcpy(next->children,
                                child_stack->data + (child_stack->element_size * nfs_val),
                                child_stack->element_size * next->child_count);
-                        
+
                         child_stack->index -= next->child_count;
                     }
 
@@ -1196,6 +1225,7 @@ void umn_parse(__uint8_t *data)
     }
 
     putchar('\n');
+    printf("nodes left = %zu\n", node_stack->index);
     for (size_t i = 0; i < node_stack->index; i++)
     {
         umn_parse_node_print(
