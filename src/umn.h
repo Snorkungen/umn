@@ -879,7 +879,7 @@ void umn_parse(__uint8_t *data)
             {
                 /* push a new bracket location that includes the function  */
                 struct UMN_Bracket_Location temp_bl = {.begin = bracket_location.begin - 1, .end = bracket_location.end, .depth = bracket_location.depth++, .hack = 1};
-                umn_stack_push(bracket_stack, &temp_bl, NULL); 
+                umn_stack_push(bracket_stack, &temp_bl, NULL);
             }
         }
 
@@ -889,11 +889,13 @@ void umn_parse(__uint8_t *data)
             size_t i;
             for (i = base; i < node_stack->index; i++)
             {
+                int curr_is_phantom = 0; /* indicate whether curr actually exists in the node stack */
                 curr = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i));
                 prev = (i > base) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i - 1))) : NULL;
                 next = ((i + 1) < node_stack->index) ? (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + 1)))
                                                      : NULL;
 
+                /* handle functions "f(x, y)" */
                 if (umn_kind_is(curr->token.kind, UMN_KIND_BF_FUNCTION) && curr->child_count == 0 && oper_prec_level == 5)
                 {
                     /* What this think does not support functions given no arguments */
@@ -994,6 +996,29 @@ void umn_parse(__uint8_t *data)
                     }
 
                     continue;
+                }
+
+                /* intercept and check if the following is a case for implicit multiplicatio */
+                if (UMN_KIND_OPERATOR_PREC_LEVEl(UMN_KIND_MULT) == oper_prec_level)
+                {
+                    /* check that the following tokens imply multiplication */
+                    if (umn_kind_compare(curr->token.kind, UMN_KIND_COMMA) || (umn_kind_is(curr->token.kind, UMN_KIND_BF_OPERATOR) && curr->child_count == 0))
+                    {
+                        continue;
+                    }
+                    else if (next == NULL || umn_kind_compare(next->token.kind, UMN_KIND_COMMA) || (umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->child_count == 0))
+                    {
+                        continue;
+                    }
+                    /* it can be assumed that the following state implies that the current and next node should be multiplied */
+
+                    prev = curr;
+                    struct UMN_PNode mult_node = {
+                        .token = {.kind = UMN_KIND_MULT, .value = {(size_t)'*' | ((size_t)'*' << (56)), 0}, .begin = curr->token.end - 1, .end = next->token.begin},
+                        .child_count = 0,
+                    };
+                    curr = &mult_node;
+                    curr_is_phantom = 1;
                 }
 
                 /* for testing only care about operators */
@@ -1189,6 +1214,10 @@ void umn_parse(__uint8_t *data)
 
                 { /* modify stack by removing children from stack and shifting nodes backwards */
                     int elements_to_shift_by = offset_amount;
+                    if (curr_is_phantom)
+                    {
+                        elements_to_shift_by -= 1;
+                    }
 
                     // printf("stack index = %zu, offset_amount = %d\n", node_stack->index, offset_amount);
                     // printf("child count = %zu\n", child_stack->index);
@@ -1207,10 +1236,17 @@ void umn_parse(__uint8_t *data)
                         (node_stack->element_capacity * node_stack->element_size) - ((i + elements_to_shift_by) * node_stack->element_size));
 
                     /* move stack index back by 2 */
+                    node_stack->index -= (elements_to_shift_by);
 
-                    node_stack->index -= elements_to_shift_by;
-
-                    memcpy(node_stack->data + (i - 1) * node_stack->element_size, &pnode, (sizeof(struct UMN_PNode)));
+                    /* this is a hack to fix, a problem caused by setting curr to point to a node not in the node stack */
+                    if (curr_is_phantom)
+                    {
+                        memcpy(node_stack->data + (i)*node_stack->element_size, &pnode, (sizeof(struct UMN_PNode)));
+                    }
+                    else
+                    {
+                        memcpy(node_stack->data + (i - 1) * node_stack->element_size, &pnode, (sizeof(struct UMN_PNode)));
+                    }
                 }
 
                 // umn_parse_node_print(&pnode);
