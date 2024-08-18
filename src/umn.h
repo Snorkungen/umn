@@ -841,7 +841,11 @@ void umn_parse(__uint8_t *data)
     bracket_location.depth = 0;
     umn_stack_push(bracket_stack, &bracket_location, NULL);
 
-    struct UMN_PNode *curr = NULL, *prev, *next;
+    /* stack of numbers to be used by function */
+    struct UMN_Stack *index_stack = umn_stack_init(arena, node_stack->element_capacity, sizeof(size_t));
+    assert(index_stack != NULL);
+
+    struct UMN_PNode *curr = NULL, *prev = NULL, *next = NULL;
 
     size_t base = 0;
     size_t prev_depth = 0;
@@ -910,7 +914,7 @@ void umn_parse(__uint8_t *data)
                     }
 
                     /* this is dumb ... deals with stuff like "func d, func a, b, c" to be read as "func(d, func(a, b, c))" */
-                    struct UMN_Stack *nested_func_stack = umn_stack_init(arena, node_stack->index, sizeof(size_t));
+                    index_stack->index = 0;
 
                     int elements_to_shift_by = 0, value_expected = 1;
                     child_stack->index = 0;
@@ -931,7 +935,7 @@ void umn_parse(__uint8_t *data)
 
                             if (umn_kind_is(next->token.kind, UMN_KIND_BF_FUNCTION) && next->child_count == 0)
                             {
-                                assert(umn_stack_push(nested_func_stack, &child_stack->index, NULL) == 0);
+                                assert(umn_stack_push(index_stack, &child_stack->index, NULL) == 0);
                             }
                             else
                             {
@@ -952,7 +956,7 @@ void umn_parse(__uint8_t *data)
                     }
 
                     size_t nfs_val = 0;
-                    while (umn_stack_pop(nested_func_stack, &nfs_val) == 0 && nfs_val > 0)
+                    while (umn_stack_pop(index_stack, &nfs_val) == 0 && nfs_val > 0)
                     {
                         /* validate that the nested function has arguments ... */
                         if (nfs_val == child_stack->index)
@@ -1002,11 +1006,11 @@ void umn_parse(__uint8_t *data)
                 if (UMN_KIND_OPERATOR_PREC_LEVEl(UMN_KIND_MULT) == oper_prec_level)
                 {
                     /* check that the following tokens imply multiplication */
-                    if (umn_kind_compare(curr->token.kind, UMN_KIND_COMMA) || (umn_kind_is(curr->token.kind, UMN_KIND_BF_OPERATOR) && curr->child_count == 0))
+                    if (umn_kind_is(curr->token.kind, UMN_KIND_BF_KEYWORD) && curr->child_count == 0)
                     {
                         continue;
                     }
-                    else if (next == NULL || umn_kind_compare(next->token.kind, UMN_KIND_COMMA) || (umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->child_count == 0))
+                    else if (next == NULL || (umn_kind_is(next->token.kind, UMN_KIND_BF_KEYWORD) && next->child_count == 0))
                     {
                         continue;
                     }
@@ -1022,7 +1026,7 @@ void umn_parse(__uint8_t *data)
                 }
 
                 /* for testing only care about operators */
-                if (!umn_kind_is_operator(curr->token.kind))
+                if (!umn_kind_is_operator(curr->token.kind) || curr->child_count > 0)
                 {
                     continue; /* only operators have a use */
                 }
@@ -1038,11 +1042,6 @@ void umn_parse(__uint8_t *data)
                     goto error_bad;
                 }
 
-                if (curr->child_count > 0 && umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR))
-                {
-                    continue;
-                }
-
                 /* UNARY Hanlding, +-+-(a) ...   */
                 /* TODO: support nesting unary operators */
                 /* detect situation where being a unary operator is suitable */
@@ -1054,85 +1053,84 @@ void umn_parse(__uint8_t *data)
                      */
                     if (prev == NULL || (umn_kind_is(prev->token.kind, UMN_KIND_BF_OPERATOR) && prev->child_count < 2))
                     {
-                        /* handle unary '+' & '-' */
-                        /* check something according to some types of rules and do stuff skip for now */
-
-                        /* count how many minus and pluses there */
                         int offset = 1;
                         int minus_count = umn_kind_compare(curr->token.kind, UMN_KIND_SUB) ? 1 : 0;
 
-                        for (; (i + offset) < node_stack->index; offset++)
-                        {
-                            next = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * (i + offset)));
+                        /* Inspired by function nesting nest unary operators */
+                        child_stack->index = 0;
+                        index_stack->index = 0;
+                        int elements_to_shift_by = 0;
 
-                            if (!umn_kind_is(next->token.kind, UMN_KIND_BF_UNARY) || next->child_count > 0)
+                        assert(umn_stack_push(index_stack, &child_stack->index, NULL) == 0); /* push the current unary operator onto the index stack so that the following loop can do the logic part*/
+                        assert(umn_stack_push(child_stack, curr, NULL) == 0);
+
+                        for (size_t j = i + 1; j < node_stack->index; j++)
+                        {
+                            next = (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * j));
+
+                            if (!umn_kind_is(next->token.kind, UMN_KIND_BF_UNARY) && umn_kind_is(next->token.kind, UMN_KIND_BF_KEYWORD) && next->child_count == 0)
                             {
                                 break;
                             }
 
-                            minus_count += umn_kind_compare(next->token.kind, UMN_KIND_SUB) ? 1 : 0;
+                            if (umn_kind_is(next->token.kind, UMN_KIND_BF_UNARY) && next->child_count == 0)
+                            {
+                                elements_to_shift_by++;
+                                assert(umn_stack_push(index_stack, &child_stack->index, NULL) == 0);
+                                assert(umn_stack_push(child_stack, next, NULL) == 0);
+                                continue;
+                            }
+                            else
+                            {
+                                elements_to_shift_by++;
+                                assert(umn_stack_push(child_stack, next, NULL) == 0);
+                                break;
+                            }
                         }
 
-                        /* check that the next token is not an unitialised operator */
-                        if (umn_kind_is(next->token.kind, UMN_KIND_BF_OPERATOR) && next->child_count == 0)
+                        size_t un_index = 0;
+                        while (umn_stack_pop(index_stack, &un_index) == 0)
                         {
-                            umn_parse_print_error(&tokeniser, (struct UMN_Token){.kind = curr->token.kind, .begin = curr->token.begin, .end = next->token.end}); /* bad stuff */
-                            fputs("umn_parse: next token is invalid \n", stderr);
+                            if (un_index >= child_stack->index)
+                            {
+                                umn_parse_print_error(&tokeniser, (struct UMN_Token){.kind = curr->token.kind, .begin = curr->token.begin, .end = ((struct UMN_PNode *)(child_stack->data + child_stack->element_size * (child_stack->index - 1)))->token.end});
+                                fputs("umn_parse: unary check next token is invalid #1089\n", stderr);
+                                goto error_bad;
+                            }
+
+                            next = (struct UMN_PNode *)(child_stack->data + child_stack->element_size * (un_index)); /* this is the unary operator */
+                            next->child_count = 1;
+                            next->children = umn_arena_alloc(arena, sizeof(struct UMN_PNode));
+                            memcpy(next->children, child_stack->data + (child_stack->element_size * (un_index + 1)), sizeof(struct UMN_PNode)); /* this is the unary operator's value */
+
+                            if (umn_kind_is_keyword(next->children->token.kind) && next->children->child_count == 0) /* check that next is a value */
+                            {
+                                umn_parse_print_error(&tokeniser, next->token);
+                                fputs("umn_parse: unary something went wrong #1098\n", stderr);
+                                goto error_bad;
+                            }
+
+                            child_stack->index -= 1;
+                        }
+
+                        if (child_stack->index != 1)
+                        {
+                            umn_parse_print_error(&tokeniser, curr->token);
+                            fputs("umn_parse: unary next token not found ...#1116\n", stderr);
                             goto error_bad;
                         }
 
-                        /*
-                            BELOW COMMENTED SECTION IS MULTIPLYING VALUE BY -1
-                        */
+                        {                                                              /* remove elements from the node stack*/
+                            memcpy(curr, child_stack->data, sizeof(struct UMN_PNode)); /* copy updated curr from child stack */
 
-                        // if ((minus_count & 1) == 1)
-                        // {
-                        //     if (umn_kind_is(next->token.kind, UMN_KIND_BF_NUMERIC))
-                        //     {
-                        //         next->token.value[0] *= -1; /* make value negative */
-                        //     }
-                        //     else
-                        //     {
-                        //         /* create a new node that is a multiplication of -1 * (next) */
-                        //         struct UMN_PNode *children = umn_arena_alloc(arena, sizeof(struct UMN_PNode) * 2);
+                            /* remove n elements from node stack */
+                            memmove(
+                                node_stack->data + ((i + 1) * node_stack->element_size),
+                                node_stack->data + ((i + elements_to_shift_by + 1) * node_stack->element_size),
+                                (node_stack->element_capacity * node_stack->element_size) - ((i + elements_to_shift_by + 1) * node_stack->element_size));
 
-                        //         children->token.kind = UMN_KIND_INTEGER;
-                        //         children->token.value[0] = -1;
-
-                        //         memcpy(children + 1, next, sizeof(struct UMN_PNode)); /* copy the next value into the the next child */
-
-                        //         struct UMN_PNode mult_node = {
-                        //             .token = {.kind = UMN_KIND_MULT, .value = {(size_t)'*' /* this works due to little endian */, 0}, .begin = curr->token.begin, .end = next->token.end},
-                        //             .child_count = 2,
-                        //             .children = children};
-
-                        //         memcpy(next, &mult_node, sizeof(struct UMN_PNode));
-                        //     }
-                        // }
-
-                        // /* delete the first node and  shift stack back down */
-                        // memmove(node_stack->data + node_stack->element_size * i, node_stack->data + node_stack->element_size * (i + offset),
-                        //         (node_stack->element_capacity * node_stack->element_size) - ((i + offset) * node_stack->element_size));
-
-                        // node_stack->index -= offset;
-
-                        /*
-                            BELOW CREATE A UNARY OPERATION BY WRAPPING RESULTING TOKEN
-                        */
-
-                        {                                                                                                                                                                          /* THIS IS DOING WHAT I WANTED TO AVOID CREATING INFORMATION */
-                            curr->token.kind = (minus_count & 1) == 1 ? UMN_KIND_SUB : UMN_KIND_ADD;                                                                                               /* modify token kind */
-                            curr->token.value[0] = (minus_count & 1) == 1 ? (size_t)'-' | ((size_t)'-' << ((sizeof(size_t) - 1) * 8)) : (size_t)'+' | ((size_t)'+' << ((sizeof(size_t) - 1) * 8)); /*  */
+                            node_stack->index -= elements_to_shift_by;
                         }
-
-                        curr->child_count = 1;
-                        curr->children = umn_arena_alloc(arena, sizeof(struct UMN_PNode));
-                        memmove(curr->children, next, sizeof(struct UMN_PNode));
-
-                        /* remove the element immediatly after the series of unary operators */
-                        memmove(node_stack->data + node_stack->element_size * (i + 1), node_stack->data + node_stack->element_size * (i + offset + 1),
-                                (node_stack->element_capacity * node_stack->element_size) - ((i + offset) * node_stack->element_size));
-                        node_stack->index -= offset;
 
                         continue;
                     }
