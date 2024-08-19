@@ -601,25 +601,28 @@ int main(int argc, char **argv)
     /* "0xa - (-0b11) = 13a_0o71öl_pastej∑" */
     // umn_parse("2 + 1 *4 + a");
 
-    umn_parse("1 * -+-a * 1 * 2 - 1");
-    umn_parse("--a / 1 * - 1");
-    umn_parse("1 * (a - b) + 1 + -a**2");
-    umn_parse("(1 + (a- 1) * (b - 1)) * (a)");
-    umn_parse("1 + (a * (b - 1) - (c - 1))");
-    umn_parse("(a + b) * (a ** (b - 1)) - -(a - b)");
+    struct UMN_Arena *arenaptr = umn_arena_init(sizeof(struct UMN_PNode) * 1000);
 
-    umn_parse("a + testf(2 + 2)");
-    umn_parse("a + testf(2, b * (2 - a)) + 2");
-    umn_parse("testf testf( a -b, c), d + 2");       /* expected: testf(testf(a - b, c), d) */
-    umn_parse("testf testf( a -b, testf c), d + 2"); /* expected: testf(testf(a - b, testf(c)), d) */
-    umn_parse("testf testf(a), b");
+   // umn_parse(arenaptr, "(1 *-1) - (10 * 2)"); /* this is wrong some how*/
+    umn_parse(arenaptr, "1 * -+-a * 1 * 2 - 1");
+    // umn_parse("--a / 1 * - 1");
+    // umn_parse("1 * (a - b) + 1 + -a**2");
+    // umn_parse("(1 + (a- 1) * (b - 1)) * (a)");
+    // umn_parse("1 + (a * (b - 1) - (c - 1))");
+    // umn_parse("(a + b) * (a ** (b - 1)) - -(a - b)");
 
-    umn_parse("testf(testf c)(a * b)");
-    umn_parse("testf a, testf c d");
+    // umn_parse("a + testf(2 + 2)");
+    // umn_parse("a + testf(2, b * (2 - a)) + 2");
+    // umn_parse("testf testf( a -b, c), d + 2");       /* expected: testf(testf(a - b, c), d) */
+    // umn_parse("testf testf( a -b, testf c), d + 2"); /* expected: testf(testf(a - b, testf(c)), d) */
+    // umn_parse("testf testf(a), b");
 
-    umn_parse("2a + a"); /* TODO: add support for implicit multiplication, i.e. (2 * a) + a */
+    // umn_parse("testf(testf c)(a * b)");
+    // umn_parse("testf a, testf c d");
 
-    umn_parse("testf a, b 10");
+    // umn_parse("2a + a"); /* TODO: add support for implicit multiplication, i.e. (2 * a) + a */
+
+    // umn_parse("testf a, b 10");
     return 0; /* Ignore the below program seg faults fvalues points to a bad pointer */
     void *arena = marena_init();
 

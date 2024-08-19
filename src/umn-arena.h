@@ -121,7 +121,7 @@ void *umn_arena_alloc(struct UMN_Arena *arena, size_t alloc_size)
     return allocation + sizeof(size_t);
 }
 
-#define umn_arena_allocation_size(allocation) *(size_t *)(allocation - 1)
+#define umn_arena_allocation_size(allocation) *(size_t *)((size_t *)allocation - 1)
 
 /* extend the current allocation if possible */
 void *umn_arena_realloc(struct UMN_Arena *arena, void *allocation, size_t alloc_size)
@@ -210,6 +210,11 @@ int umn_stack_push(struct UMN_Stack *stack, void *src_element, struct UMN_Arena 
     /* check if there is room in the stack */
     if ((stack->index + 1) >= stack->element_capacity)
     {
+        if (arena == NULL)
+        {
+            return -1; /* no arena given */
+        }
+        
         return -1; /* no room in stack */
     }
 

@@ -733,10 +733,93 @@ void umn_parse_node_print(struct UMN_PNode *pnode)
     puts(message_buffer);
 }
 
-void umn_parse(__uint8_t *data)
+/*
+    copy a parse node into an arena
+    @param pnode allocated buffer to copy nodes into
+*/
+struct UMN_PNode *umn_parse_node_copy(struct UMN_Arena *arena, struct UMN_PNode *pnode)
+{
+    size_t node_capacity = 50;
+    /* allocate buffer fornode to be copied into */
+    struct UMN_PNode *dest_node = umn_arena_alloc(arena, (sizeof(struct UMN_PNode)) * node_capacity);
+    assert(dest_node != NULL);
+
+    size_t curr_idx = 0; /* current insert index */
+
+    /* copy node into dest buffer */
+    memcpy(dest_node, pnode, sizeof(struct UMN_PNode));
+    curr_idx++;
+
+    struct UMN_PNode *node = NULL; /* pointer to a node to copy the children from */
+
+    /* stack of node indices */
+    size_t node_idx = 0;
+    struct UMN_Stack *idx_stack = umn_stack_init(arena, 40, sizeof(node_idx));
+    assert(idx_stack != NULL);
+
+    assert(umn_stack_push(idx_stack, &node_idx, arena) == 0);
+
+    while (umn_stack_pop(idx_stack, &node_idx) == 0)
+    {
+        node = dest_node + node_idx;
+
+        if (node->child_count == 0)
+        {
+            continue;
+        }
+
+        /* check if the children fit into the child nodes */
+        if ((curr_idx + node->child_count) >= node_capacity)
+        {
+            /* increase the capacity */
+            node_capacity = node_capacity * 2;
+            /* reallocate the buffer */
+            struct UMN_PNode *tmp = umn_arena_realloc(arena, dest_node, sizeof(struct UMN_PNode) * node_capacity), *tmp_node;
+            assert(tmp != NULL);
+            if (tmp != dest_node)
+            { /* fix the pointers */
+                for (size_t i = 0; i < node_idx; i++)
+                {
+                    tmp_node = tmp + i;
+                    if (tmp_node->child_count == 0)
+                    {
+                        continue;
+                    }
+                    /* fix pointer */
+                    size_t j = ((size_t)tmp_node->children - (size_t)dest_node) / (size_t)(sizeof(struct UMN_PNode));
+                    tmp_node->children = tmp + j;
+                }
+
+                dest_node = tmp;
+            }
+        }
+
+        node = dest_node + node_idx;
+        memcpy(dest_node + curr_idx, node->children, (sizeof(struct UMN_PNode)) * node->child_count);
+        node->children = dest_node + curr_idx;
+        curr_idx += node->child_count;
+
+        for (size_t i = 0; i < node->child_count; i++)
+        {
+            node_idx = curr_idx - 1 - i;
+            if (umn_stack_push(idx_stack, &node_idx, arena)){
+                assert(0); /* resizing stack not implemented */
+            }
+        }
+    }
+
+    umn_arena_free(arena, idx_stack);
+    return dest_node;
+}
+
+/* approach from <https://github.com/Snorkungen/expression/blob/master/expression_tree_builder2.py> */
+struct UMN_PNode *umn_parse(struct UMN_Arena *ret_arena, __uint8_t *data)
 {
     puts(data);
     putchar('\n');
+
+    assert(ret_arena != NULL);
+    struct UMN_PNode pnode = {0};
 
     struct UMN_tokeniser tokeniser = {
         .data = data,
@@ -750,20 +833,12 @@ void umn_parse(__uint8_t *data)
 
     /* initialse the arena */
     struct UMN_Arena *arena = umn_arena_init(sizeof(struct UMN_PNode) * 200);
-    if (arena == NULL)
-    {
-        fputs("umn_parse: failed to initialise the memory arena\n", stderr);
-        goto error_bad;
-    }
+    assert(arena != NULL);
 
     /* the stack was an idea but let's just use an array */
     /* instead of node list use a stack */
     struct UMN_Stack *node_stack = umn_stack_init(arena, 50 /* have the space for 30 elements */, sizeof(struct UMN_PNode));
-    if (node_stack == NULL)
-    {
-        fputs("umn_parse: failed to initialise node stack\n", stderr);
-        goto error_bad;
-    }
+    assert(arena != NULL);
 
     struct UMN_Stack *child_stack = umn_stack_init(arena, 10, sizeof(struct UMN_PNode));
     assert(child_stack != NULL);
@@ -780,10 +855,6 @@ void umn_parse(__uint8_t *data)
     struct UMN_Bracket_Location bracket_location = {0};
     struct UMN_Stack *bracket_begin_stack = umn_stack_init(arena, bracket_stack->element_capacity, sizeof(size_t));
 
-    struct UMN_PNode pnode = {};
-
-    /* approach from <https://github.com/Snorkungen/expression/blob/master/expression_tree_builder2.py> */
-
     /* collect tokens into a node list */
 
     do /* just read all nodes and push*/
@@ -796,6 +867,7 @@ void umn_parse(__uint8_t *data)
             /* debug print the surounding characters on a line */
             umn_parse_print_error(&tokeniser, pnode.token);
             fputs("umn_parse: tokeniser failed to read a token erroneus input\n", stderr);
+            pnode = pnode;
             goto error_bad;
         }
         else if (umn_kind_compare(pnode.token.kind, UMN_KIND_EOF))
@@ -824,15 +896,7 @@ void umn_parse(__uint8_t *data)
         }
 
         /* push node onto stack */
-        if (umn_stack_push(node_stack, &pnode, NULL))
-        {
-            /* handle error failed to push node onto stack */
-
-            /* TODO: stack has probably reached it's capacity and needs to be expanded */
-
-            fputs("umn_parse: failed to push node onto stack\n", stderr);
-            goto error_bad;
-        }
+        assert(umn_stack_push(node_stack, &pnode, NULL) == 0);
     } while (umn_kind_compare(pnode.token.kind, UMN_KIND_EOF) == 0);
 
     /* include the entire expression */
@@ -910,6 +974,7 @@ void umn_parse(__uint8_t *data)
                     {
                         umn_parse_print_error(&tokeniser, curr->token);
                         fputs("umn_parse: value expected #861\n", stderr);
+                        memcpy(&pnode, curr, sizeof(struct UMN_PNode));
                         goto error_bad;
                     }
 
@@ -963,6 +1028,7 @@ void umn_parse(__uint8_t *data)
                         {
                             umn_parse_print_error(&tokeniser, ((struct UMN_PNode *)(child_stack->data + child_stack->element_size * (nfs_val - 1)))->token);
                             fputs("umn_parse: value expected #934\n", stderr);
+                            memcpy(&pnode, ((struct UMN_PNode *)(child_stack->data + child_stack->element_size * (nfs_val - 1))), sizeof(struct UMN_PNode));
                             goto error_bad;
                         }
 
@@ -1003,7 +1069,7 @@ void umn_parse(__uint8_t *data)
                 }
 
                 /* intercept and check if the following is a case for implicit multiplicatio */
-                if (UMN_KIND_OPERATOR_PREC_LEVEl(UMN_KIND_MULT) == oper_prec_level)
+                if (UMN_KIND_OPERATOR_PREC_LEVEl(UMN_KIND_MULT) == oper_prec_level && 0)
                 {
                     /* check that the following tokens imply multiplication */
                     if (umn_kind_is(curr->token.kind, UMN_KIND_BF_KEYWORD) && curr->child_count == 0)
@@ -1014,9 +1080,8 @@ void umn_parse(__uint8_t *data)
                     {
                         continue;
                     }
-                    /* it can be assumed that the following state implies that the current and next node should be multiplied */
 
-                    prev = curr;
+                    /* it can be assumed that the following state implies that the current and next node should be multiplied */
                     struct UMN_PNode mult_node = {
                         .token = {.kind = UMN_KIND_MULT, .value = {(size_t)'*' | ((size_t)'*' << (56)), 0}, .begin = curr->token.end - 1, .end = next->token.begin},
                         .child_count = 0,
@@ -1039,6 +1104,7 @@ void umn_parse(__uint8_t *data)
                     }
                     umn_parse_print_error(&tokeniser, curr->token);
                     fputs("umn_parse: token expected\n", stderr);
+                    memcpy(&pnode, curr, sizeof(struct UMN_PNode));
                     goto error_bad;
                 }
 
@@ -1051,7 +1117,7 @@ void umn_parse(__uint8_t *data)
                         - first operator - 1
                         - previous token is an unitialised operator 2 (* - 1)
                      */
-                    if (prev == NULL || (umn_kind_is(prev->token.kind, UMN_KIND_BF_OPERATOR) && prev->child_count < 2))
+                    if (prev == NULL || (umn_kind_is(prev->token.kind, UMN_KIND_BF_KEYWORD) && prev->child_count == 0))
                     {
                         int offset = 1;
                         int minus_count = umn_kind_compare(curr->token.kind, UMN_KIND_SUB) ? 1 : 0;
@@ -1095,6 +1161,10 @@ void umn_parse(__uint8_t *data)
                             {
                                 umn_parse_print_error(&tokeniser, (struct UMN_Token){.kind = curr->token.kind, .begin = curr->token.begin, .end = ((struct UMN_PNode *)(child_stack->data + child_stack->element_size * (child_stack->index - 1)))->token.end});
                                 fputs("umn_parse: unary check next token is invalid #1089\n", stderr);
+                                pnode.child_count = 0;
+                                pnode.token.kind = curr->token.kind;
+                                pnode.token.begin = curr->token.begin;
+                                pnode.token.end = ((struct UMN_PNode *)(child_stack->data + child_stack->element_size * (child_stack->index - 1)))->token.end;
                                 goto error_bad;
                             }
 
@@ -1107,6 +1177,7 @@ void umn_parse(__uint8_t *data)
                             {
                                 umn_parse_print_error(&tokeniser, next->token);
                                 fputs("umn_parse: unary something went wrong #1098\n", stderr);
+                                memcpy(&pnode, next, sizeof(struct UMN_PNode));
                                 goto error_bad;
                             }
 
@@ -1117,6 +1188,7 @@ void umn_parse(__uint8_t *data)
                         {
                             umn_parse_print_error(&tokeniser, curr->token);
                             fputs("umn_parse: unary next token not found ...#1116\n", stderr);
+                            memcpy(&pnode, curr, sizeof(struct UMN_PNode));
                             goto error_bad;
                         }
 
@@ -1147,13 +1219,7 @@ void umn_parse(__uint8_t *data)
                     umn_parse_print_error(&tokeniser, curr->token);
                     fputs("umn_parse: expected token before\n", stderr);
 
-                    // for (size_t i = 0; i < node_stack->index; i++)
-                    // {
-                    //     umn_parse_node_print(
-                    //         (struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i)));
-                    //     // umn_token_print(
-                    //     //     ((struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i)))->token);
-                    // }
+                    memcpy(&pnode, curr, sizeof(struct UMN_PNode));
                     goto error_bad;
                 }
 
@@ -1268,23 +1334,26 @@ void umn_parse(__uint8_t *data)
             ((struct UMN_PNode *)(node_stack->data + (node_stack->element_size * i)))->token);
     }
 
-    /* handle edge case */
-    if (node_stack->index == 1)
+    if (node_stack->index != 1)
     {
-        /* Quit nothing to do ?? */
-    }
-    else if (node_stack->index == 0)
-    {
+        fputs("umn_parse: something went wrong no root node found\n", stderr);
         goto error_bad;
     }
 
+    struct UMN_PNode *ret_node = umn_parse_node_copy(ret_arena, node_stack->data);
     /* finally delete the arena */
     umn_arena_delete(arena);
-    return;
+    memset(arena, 0, sizeof(struct UMN_PNode) * 200);
+
+    umn_parse_node_print(ret_node);
+    return ret_node;
 
 error_bad:
     umn_arena_delete(arena);
-    return;
+    struct UMN_PNode *errnode = umn_arena_alloc(ret_arena, sizeof(struct UMN_PNode));
+    memcpy(errnode, &pnode, sizeof(struct UMN_PNode));
+
+    return errnode;
 }
 
 #endif /* UMN_H */
