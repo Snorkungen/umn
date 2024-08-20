@@ -128,7 +128,7 @@ static struct UMN_Keyword UMN_keywords[] = {
 
 struct UMN_Tokeniser
 {
-    __uint8_t *data;
+    char *data;
     size_t data_length;
 
     size_t position;
@@ -210,7 +210,7 @@ size_t match_keyword(struct UMN_Tokeniser *t, const size_t begin, struct UMN_Key
     return kword->size;
 }
 
-size_t atoin(__uint8_t *s, size_t n)
+size_t atoin(char *s, size_t n)
 {
     size_t value = 0;
 
@@ -390,7 +390,7 @@ umn_tokeniser_get(struct UMN_Tokeniser *t)
             }
             break;
         case 8: /* convert 0o12 to 10*/
-            /* magic numbers exist here due the fact that the hex string is preceeded by 0o*/
+        {       /* magic numbers exist here due the fact that the hex string is preceeded by 0o*/
             int magic = 2;
             if (isdigit(t->data[token.begin + 1]))
             { /* support 0123 , octal representation*/
@@ -414,6 +414,7 @@ umn_tokeniser_get(struct UMN_Tokeniser *t)
                 }
             }
             break;
+        }
         case 16: /* convert 0x0a to 10 */
                  /* magic numbers exist here due the fact that the hex string is preceeded by 0x*/
             offset = (token.end - token.begin - 3);
@@ -425,7 +426,7 @@ umn_tokeniser_get(struct UMN_Tokeniser *t)
                 {
                     token.value[0] |= (size_t)(curr & 0xF) << (4 * offset--);
                 }
-                else if (curr | (32) >= 'a' && curr | (32) <= 'f')
+                else if ((curr | (32)) >= 'a' && (curr | (32)) <= 'f')
                 {
                     token.value[0] |= (size_t)((curr & ~(32)) - 'A' + 10) << (4 * offset--);
                 }
@@ -552,8 +553,6 @@ int umn_token_to_string(struct UMN_Token *token, char *s, size_t max_len)
             s[n++] = 'b';
         }
 
-        printf("%ld\n", value);
-
         /* move offset until first set bit is found */
         for (offset = 0; (value & ((0xffULL << 7 * 8)) >> ((offset) * 8)) == 0; offset++)
         {
@@ -662,8 +661,8 @@ void umn_parse_print_error(struct UMN_Tokeniser *tokeniser, struct UMN_Token tok
     {
         assert(tokeniser->data[tokeniser->data_length] == '\0');
 
-        fputs(tokeniser->data, stderr); /* assume there is a null byte */
-        fputc('\n', stderr);            /* write new line */
+        fputs((char *)tokeniser->data, stderr); /* assume there is a null byte */
+        fputc('\n', stderr);                    /* write new line */
 
         for (size_t i = 0; i < tokeniser->data_length; i++)
         {
@@ -690,7 +689,7 @@ struct UMN_PNode
     struct UMN_PNode *children; /* this would be a pointer to an array of nodes that are children */
 };
 
-int umn_parse_node_to_string(__uint8_t *s, size_t max_len, struct UMN_PNode *pnode, int wrap /* wheter node should be wrapped within brackets*/)
+int umn_parse_node_to_string(char *s, size_t max_len, struct UMN_PNode *pnode, int wrap /* wheter node should be wrapped within brackets*/)
 {
     int n = 0;
     if (wrap && (max_len - n) > 1)
@@ -857,7 +856,7 @@ struct UMN_PNode *umn_parse_node_copy(struct UMN_Arena *arena, struct UMN_PNode 
 }
 
 /* approach from <https://github.com/Snorkungen/expression/blob/master/expression_tree_builder2.py> */
-struct UMN_PNode *umn_parse(struct UMN_Arena *ret_arena, __uint8_t *data)
+struct UMN_PNode *umn_parse(struct UMN_Arena *ret_arena, char *data)
 {
     puts(data);
     putchar('\n');

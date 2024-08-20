@@ -80,6 +80,7 @@ int umn_apa_parse(struct UMN_Arena *arena, struct UMN_APA_Result *result)
     result->keys = umn_arena_alloc(arena, sizeof(char *) * result->argc);
 
     result->flags = umn_arena_alloc(arena, sizeof(struct UMN_APA_Flag_Values) * (result->flagc + 1)); /* allocate a room to place unknown flags */
+    memset(result->flags, 0, sizeof(struct UMN_APA_Flag_Values) * (result->flagc + 1));
 
     const size_t DEFAULT_FLAG_VALUES_CAP = 10;
     const size_t undefined_flag_index = result->flagc;
@@ -101,7 +102,7 @@ int umn_apa_parse(struct UMN_Arena *arena, struct UMN_APA_Result *result)
         int key_len = strlen(result->argv[i]);
         result->keys[result->keyc] = umn_arena_alloc(arena, key_len + 1);
         strncpy(result->keys[result->keyc], result->argv[i], key_len);
-        result->keys[result->keyc][key_len] = '0'; /* ensure that the last byte is zero */
+        result->keys[result->keyc][key_len] = '\0'; /* ensure that the last byte is zero */
 
         result->keyc += 1;
     }

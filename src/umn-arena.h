@@ -194,7 +194,7 @@ umn_stack_init(struct UMN_Arena *arena, size_t element_capacity, size_t element_
 }
 
 struct UMN_Stack *
-umn_stack_resize(struct UMN_Stack, struct UMN_Arena *arena, size_t new_element_capacity)
+umn_stack_resize(struct UMN_Stack *stack, struct UMN_Arena *arena, size_t new_element_capacity)
 {
     assert(0), "TODO: implement this method";
 }
