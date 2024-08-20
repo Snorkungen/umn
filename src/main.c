@@ -4,6 +4,7 @@
 #include <string.h>
 #include <ctype.h>
 #include "umn.h"
+#include "umn-apa.h"
 
 typedef struct
 {
@@ -603,26 +604,32 @@ int main(int argc, char **argv)
 
     struct UMN_Arena *arenaptr = umn_arena_init(sizeof(struct UMN_PNode) * 1000);
 
-    // umn_parse(arenaptr, "(1 *-1) - (10 * 2)"); /* this is wrong some how*/
-    umn_parse(arenaptr, "1 * -+-a * 1 * 2 - 1");
-    // umn_parse("--a / 1 * - 1");
-    // umn_parse("1 * (a - b) + 1 + -a**2");
-    // umn_parse("(1 + (a- 1) * (b - 1)) * (a)");
-    // umn_parse("1 + (a * (b - 1) - (c - 1))");
-    // umn_parse("(a + b) * (a ** (b - 1)) - -(a - b)");
+    struct UMN_APA_Flag_Definition flag_defs[] = {
+        {.short_name = 'd', .name = "decimal", .contiguous = 1},
+        {.short_name = 'b', .name = "binary", .contiguous = 1},
+        {.short_name = 'o', .name = "octal", .contiguous = 1},
+        {.short_name = 'x', .name = "hex", .contiguous = 1},
+        {.short_name = 'i', .name = "interctive", .contiguous = 0},
+    };
 
-    // umn_parse("a + testf(2 + 2)");
-    // umn_parse("a + testf(2, b * (2 - a)) + 2");
-    // umn_parse("testf testf( a -b, c), d + 2");       /* expected: testf(testf(a - b, c), d) */
-    // umn_parse("testf testf( a -b, testf c), d + 2"); /* expected: testf(testf(a - b, testf(c)), d) */
-    // umn_parse("testf testf(a), b");
+    char *fargv[] = {"-d", "40", "-", "10", "-x", "100", "-i", "fds", "df", "-d", "10"};
 
-    // umn_parse("testf(testf c)(a * b)");
-    // umn_parse("testf a, testf c d");
+    struct UMN_APA_Result apa_result = {
+        .argc = 11,
+        .argv = fargv,
+        .flagc = 5,
+        .flagd = flag_defs,
+    };
 
-    // umn_parse("2a + a"); /* TODO: add support for implicit multiplication, i.e. (2 * a) + a */
+    if (umn_apa_parse(arenaptr, &apa_result)) {
+        assert(0); /* the parser should not fail ... */
+    }
+
+    printf("%ld\n", apa_result.flags->count);
+
 
     umn_parse(arenaptr, "testf a, b 10");
+
     umn_arena_delete(arenaptr);
     return 0; /* Ignore the below program seg faults fvalues points to a bad pointer */
     void *arena = marena_init();
