@@ -603,7 +603,7 @@ int main(int argc, char **argv)
 
     struct UMN_Arena *arenaptr = umn_arena_init(sizeof(struct UMN_PNode) * 1000);
 
-   // umn_parse(arenaptr, "(1 *-1) - (10 * 2)"); /* this is wrong some how*/
+    // umn_parse(arenaptr, "(1 *-1) - (10 * 2)"); /* this is wrong some how*/
     umn_parse(arenaptr, "1 * -+-a * 1 * 2 - 1");
     // umn_parse("--a / 1 * - 1");
     // umn_parse("1 * (a - b) + 1 + -a**2");
@@ -622,7 +622,8 @@ int main(int argc, char **argv)
 
     // umn_parse("2a + a"); /* TODO: add support for implicit multiplication, i.e. (2 * a) + a */
 
-    // umn_parse("testf a, b 10");
+    umn_parse(arenaptr, "testf a, b 10");
+    umn_arena_delete(arenaptr);
     return 0; /* Ignore the below program seg faults fvalues points to a bad pointer */
     void *arena = marena_init();
 

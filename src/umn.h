@@ -126,7 +126,7 @@ static struct UMN_Keyword UMN_keywords[] = {
     UMN_CREATE_KWORD(UMN_KIND_CREATE_FUNC(1), "testf"),
 };
 
-struct UMN_tokeniser
+struct UMN_Tokeniser
 {
     __uint8_t *data;
     size_t data_length;
@@ -149,7 +149,7 @@ size_t __power(size_t base, size_t exponent)
 }
 
 /* reads from the begin point, if a keyword is found returns the length of the keyword */
-size_t match_keyword(struct UMN_tokeniser *t, const size_t begin, struct UMN_Keyword *kword)
+size_t match_keyword(struct UMN_Tokeniser *t, const size_t begin, struct UMN_Keyword *kword)
 {
     if (t == NULL || t->keywords == NULL)
     {
@@ -231,7 +231,7 @@ size_t atoin(__uint8_t *s, size_t n)
     Compares literals to keywords, otherwise greedily reads the entire word
 */
 struct UMN_Token
-umn_tokeniser_get(struct UMN_tokeniser *t)
+umn_tokeniser_get(struct UMN_Tokeniser *t)
 {
     struct UMN_Token token = (struct UMN_Token){0};
     __uint8_t curr = t->data[t->position];
@@ -377,7 +377,7 @@ umn_tokeniser_get(struct UMN_tokeniser *t)
 
                 if (curr == '0')
                 {
-                    ; /* noop*/
+                    offset--;
                 }
                 else if (curr == '1')
                 {
@@ -522,6 +522,72 @@ umn_tokeniser_get(struct UMN_tokeniser *t)
 /* include an arena where i can keep stuff */
 #include "umn-arena.h"
 
+/* write the value of the token to to `s`*/
+int umn_token_to_string(struct UMN_Token *token, char *s, size_t max_len)
+{
+    if (umn_kind_is(token->kind, UMN_KIND_BF_LITERAL))
+    {
+        return snprintf(s, max_len, "%s", (char *)token->value);
+    }
+
+    if (umn_kind_is(token->kind, UMN_KIND_BF_FRACTION))
+    {
+        return snprintf(s, max_len, "%f", (double)token->value[0] / token->value[1]);
+    }
+
+    if (!umn_kind_is(token->kind, UMN_KIND_BF_INTEGER))
+    {
+        return 0;
+    }
+
+    /* respect the encoding in the integer */
+    switch (token->value[1])
+    {
+    case 2: /* binary 0b....*/
+    {
+        size_t n = 0, value = token->value[0], offset = 0;
+        if (n + 2 < max_len)
+        {
+            s[n++] = '0';
+            s[n++] = 'b';
+        }
+
+        printf("%ld\n", value);
+
+        /* move offset until first set bit is found */
+        for (offset = 0; (value & ((0xffULL << 7 * 8)) >> ((offset) * 8)) == 0; offset++)
+        {
+            ; /* noop the above statement does some cursed B.S. */
+        }
+
+        offset = offset * 8; /* multiply byte offset to bits */
+
+        /* move offset untill it finds its first byte with a 1*/
+        while (offset <= sizeof(value) * 8)
+        {
+            if (value & (1ULL << (sizeof(value) * 8 - (++offset))))
+            {
+                break;
+            }
+        }
+
+        while (offset <= sizeof(value) * 8 && n + 1 < max_len)
+        {
+            s[n++] = value & (1ULL << (sizeof(value) * 8 - offset++)) ? '1' : '0';
+        }
+
+        return n;
+    }
+    case 8: /* octal 0o....*/
+        return snprintf(s, max_len, "0o%lo", token->value[0]);
+    case 16: /* hexadecimal 0x.... */
+        return snprintf(s, max_len, "%#lx", token->value[0]);
+    case 10:
+    default: /* decimal 1234...*/
+        return snprintf(s, max_len, "%zu", token->value[0]);
+    }
+}
+
 static inline void umn_token_print(struct UMN_Token token)
 {
     /* token kind to string */
@@ -577,21 +643,12 @@ static inline void umn_token_print(struct UMN_Token token)
         s = "UMN_KIND_FUNCTION";
     }
 
-    if (umn_kind_compare(token.kind, UMN_KIND_INTEGER))
-    {
-        printf("Token.kind = %s, Token.value_int = %ld, Token.begin = %zu, Token.end = %zu\n", s, token.value[0], token.begin, token.end);
-    }
-    else if (umn_kind_compare(token.kind, UMN_KIND_FRACTION))
-    {
-        printf("Token.kind = %s, Token.value_float = %f, Token.begin = %zu, Token.end = %zu\n", s, (double)token.value[0] / token.value[1], token.begin, token.end);
-    }
-    else
-    {
-        printf("Token.kind = %s, Token.value_str = \'%s\', Token.begin = %zu, Token.end = %zu\n", s, (char *)token.value, token.begin, token.end);
-    }
+    char vs[100] = {0};
+    umn_token_to_string(&token, vs, 99);
+    printf("Token.kind = %s, Token.value = \"%s\", Token.begin = %zu, Token.end = %zu\n", s, vs, token.begin, token.end);
 }
 
-void umn_parse_print_error(struct UMN_tokeniser *tokeniser, struct UMN_Token token)
+void umn_parse_print_error(struct UMN_Tokeniser *tokeniser, struct UMN_Token token)
 {
     static __uint8_t msg_buffer[80]; /* this could be static so that it could be modified and stuff */
 
@@ -641,29 +698,11 @@ int umn_parse_node_to_string(__uint8_t *s, size_t max_len, struct UMN_PNode *pno
         s[n++] = '(';
     }
 
-    if (umn_kind_is(pnode->token.kind, UMN_KIND_BF_INTEGER))
-    {
-        /* keep in mind the different encoding available */
-        n += snprintf(s + n, max_len - n, "%ld", pnode->token.value[0]);
-    }
-    else if (umn_kind_is(pnode->token.kind, UMN_KIND_BF_FRACTION))
-    {
-        n += snprintf(s + n, max_len - n, "%f", (double)pnode->token.value[0] / pnode->token.value[1]);
-    }
-    else if (!umn_kind_is(pnode->token.kind, UMN_KIND_LITERAL))
-    {
-        /* not a literal so nothing */
-        n += (*s = 0);
-    }
-    else if (pnode->child_count == 0)
-    {
-        n += snprintf(s + n, max_len - n, "%s", (char *)(pnode->token.value));
-    }
-    else if (umn_kind_is(pnode->token.kind, UMN_KIND_BF_FUNCTION))
+    if (umn_kind_is(pnode->token.kind, UMN_KIND_BF_FUNCTION))
     {
         assert(pnode->children);
 
-        n += snprintf(s + n, max_len - n, "%s", (char *)(pnode->token.value));
+        n += umn_token_to_string(&pnode->token, s + n, max_len - n);
 
         if ((max_len - n) > 1)
         {
@@ -685,7 +724,7 @@ int umn_parse_node_to_string(__uint8_t *s, size_t max_len, struct UMN_PNode *pno
             s[n++] = ')';
         }
     }
-    else
+    else if (pnode->child_count > 0)
     {
         assert(pnode->children);
 
@@ -715,6 +754,10 @@ int umn_parse_node_to_string(__uint8_t *s, size_t max_len, struct UMN_PNode *pno
                 n += umn_parse_node_to_string(s + n, max_len - n, pnode->children + i, should_wrap);
             }
         }
+    }
+    else
+    {
+        n += umn_token_to_string(&pnode->token, s + n, max_len - n);
     }
 
     if (wrap && (max_len - n) > 1)
@@ -802,7 +845,8 @@ struct UMN_PNode *umn_parse_node_copy(struct UMN_Arena *arena, struct UMN_PNode 
         for (size_t i = 0; i < node->child_count; i++)
         {
             node_idx = curr_idx - 1 - i;
-            if (umn_stack_push(idx_stack, &node_idx, arena)){
+            if (umn_stack_push(idx_stack, &node_idx, arena))
+            {
                 assert(0); /* resizing stack not implemented */
             }
         }
@@ -821,7 +865,7 @@ struct UMN_PNode *umn_parse(struct UMN_Arena *ret_arena, __uint8_t *data)
     assert(ret_arena != NULL);
     struct UMN_PNode pnode = {0};
 
-    struct UMN_tokeniser tokeniser = {
+    struct UMN_Tokeniser tokeniser = {
         .data = data,
         .data_length = strlen(data),
 
@@ -1069,7 +1113,7 @@ struct UMN_PNode *umn_parse(struct UMN_Arena *ret_arena, __uint8_t *data)
                 }
 
                 /* intercept and check if the following is a case for implicit multiplicatio */
-                if (UMN_KIND_OPERATOR_PREC_LEVEl(UMN_KIND_MULT) == oper_prec_level && 0)
+                if (UMN_KIND_OPERATOR_PREC_LEVEl(UMN_KIND_MULT) == oper_prec_level)
                 {
                     /* check that the following tokens imply multiplication */
                     if (umn_kind_is(curr->token.kind, UMN_KIND_BF_KEYWORD) && curr->child_count == 0)
@@ -1081,6 +1125,7 @@ struct UMN_PNode *umn_parse(struct UMN_Arena *ret_arena, __uint8_t *data)
                         continue;
                     }
 
+                    prev = curr; /* set previous to current */
                     /* it can be assumed that the following state implies that the current and next node should be multiplied */
                     struct UMN_PNode mult_node = {
                         .token = {.kind = UMN_KIND_MULT, .value = {(size_t)'*' | ((size_t)'*' << (56)), 0}, .begin = curr->token.end - 1, .end = next->token.begin},
@@ -1343,9 +1388,7 @@ struct UMN_PNode *umn_parse(struct UMN_Arena *ret_arena, __uint8_t *data)
     struct UMN_PNode *ret_node = umn_parse_node_copy(ret_arena, node_stack->data);
     /* finally delete the arena */
     umn_arena_delete(arena);
-    memset(arena, 0, sizeof(struct UMN_PNode) * 200);
 
-    umn_parse_node_print(ret_node);
     return ret_node;
 
 error_bad:
