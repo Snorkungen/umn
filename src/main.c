@@ -32,8 +32,10 @@ int main(int argc, char **argv)
         assert(0); /* the parser should not fail ... */
     }
 
-    if (apa_result.keyc > 1)
+    if (apa_result.keyc > 1 && 0)
     {
+        /* match keywords and dispatch some kindof special logic ... */
+
         puts("Keys:");
         for (size_t i = 0; i < apa_result.keyc; i++)
         {
@@ -45,6 +47,25 @@ int main(int argc, char **argv)
         .keywords = UMN_keywords,
         .keywords_count = UMN_KWORD_COUNT,
     };
+
+    /* default parameters is just assumed to be decimal, conversion flag */
+    if (apa_result.keyc > 1)
+    {
+        /* prepend the key values into the ... */
+        /* copy over values into decimal flags position ... */
+        struct UMN_APA_Flag_Values *df = &apa_result.flags[0];
+
+        /*  allocate a new buffer */
+        int count = (apa_result.keyc - 1) + df->count;
+        char **tmp = umn_arena_alloc(arenaptr, sizeof(char *) * count);
+
+        memcpy(tmp, apa_result.keys + 1, sizeof(char *) * (apa_result.keyc - 1));
+        memcpy(tmp + (apa_result.keyc - 1), df->values, sizeof(char *) * (df->count));
+
+        df->values = tmp; /* leak memory ... it's all in arena so who cares ... */
+        df->capacity = count;
+        df->count = count;
+    }
 
     int flag_encoding_map[] = {10, 2, 8, 16};
 
@@ -62,6 +83,7 @@ int main(int argc, char **argv)
 
         for (size_t i = 0; i < fv->count; i++)
         {
+            tokeniser.position = 0;
             tokeniser.data = fv->values[i];
             tokeniser.data_length = strlen(tokeniser.data);
 
