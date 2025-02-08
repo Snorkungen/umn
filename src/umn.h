@@ -583,7 +583,7 @@ int umn_token_to_string(struct UMN_Token *token, char *s, size_t max_len)
         return snprintf(s, max_len, "%#lx", token->value[0]);
     case 10:
     default: /* decimal 1234...*/
-        return snprintf(s, max_len, "%zu", token->value[0]);
+        return snprintf(s, max_len, "%ld", token->value[0]);
     }
 }
 
@@ -591,50 +591,29 @@ static inline void umn_token_print(struct UMN_Token token)
 {
     /* token kind to string */
     char *s = "\0"; /* empty null string */
+#define DEFINE_S(KIND) \
+    case (KIND):         \
+    {                  \
+        s = #KIND;     \
+        break;         \
+    }
     switch (token.kind)
     {
-    case UMN_KIND_ERROR:
-        s = "UMN_KIND_ERROR";
-        break;
-    case UMN_KIND_EOF:
-        s = "UMN_KIND_EOF";
-        break;
-    case UMN_KIND_INTEGER:
-        s = "UMN_KIND_INTEGER";
-        break;
-    case UMN_KIND_FRACTION:
-        s = "UMN_KIND_FRACTION";
-        break;
-    case UMN_KIND_LITERAL:
-        s = "UMN_KIND_LITERAL";
-        break;
-    case UMN_KIND_ADD:
-        s = "UMN_KIND_ADD";
-        break;
-    case UMN_KIND_SUB:
-        s = "UMN_KIND_SUB";
-        break;
-    case UMN_KIND_DIV:
-        s = "UMN_KIND_DIV";
-        break;
-    case UMN_KIND_MULT:
-        s = "UMN_KIND_MULT";
-        break;
-    case UMN_KIND_EXP:
-        s = "UMN_KIND_EXP";
-        break;
-    case UMN_KIND_EQUALS:
-        s = "UMN_KIND_EQUALS";
-        break;
-    case UMN_KIND_OBRACKET:
-        s = "UMN_KIND_OBRACKET";
-        break;
-    case UMN_KIND_CBRACKET:
-        s = "UMN_KIND_CBRACKET";
-        break;
-    case UMN_KIND_COMMA:
-        s = "UMN_KIND_COMMA";
-        break;
+        DEFINE_S(UMN_KIND_ERROR);
+        DEFINE_S(UMN_KIND_EOF);
+        DEFINE_S(UMN_KIND_INTEGER);
+        DEFINE_S(UMN_KIND_FRACTION);
+        DEFINE_S(UMN_KIND_LITERAL);
+        DEFINE_S(UMN_KIND_ADD);
+        DEFINE_S(UMN_KIND_SUB);
+        DEFINE_S(UMN_KIND_DIV);
+        DEFINE_S(UMN_KIND_MULT);
+        DEFINE_S(UMN_KIND_EXP);
+        DEFINE_S(UMN_KIND_EQUALS);
+        DEFINE_S(UMN_KIND_OBRACKET);
+        DEFINE_S(UMN_KIND_CBRACKET);
+        DEFINE_S(UMN_KIND_COMMA);
+        DEFINE_S(UMN_KIND_VARIABLE);
     }
 
     if (umn_kind_is(token.kind, UMN_KIND_BF_FUNCTION))

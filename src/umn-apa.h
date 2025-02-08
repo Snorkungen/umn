@@ -54,7 +54,7 @@ int umn_apa_parse_is_flag(char *s)
 
     /* flags do not begin with numeric values */
     char firstc = s[1] == '-' ? s[2] : s[1];
-    if (isdigit(firstc))
+    if (isdigit(firstc) || isspace(firstc) || isblank(firstc) || ispunct(firstc))
     {
         return 0;
     }
@@ -91,7 +91,6 @@ int umn_apa_parse(struct UMN_Arena *arena, struct UMN_APA_Result *result)
     for (; i < result->argc; i++)
     {
         assert(result->argv[i] != NULL);
-
         if (umn_apa_parse_is_flag(result->argv[i]))
         {
             break;
@@ -159,7 +158,7 @@ int umn_apa_parse(struct UMN_Arena *arena, struct UMN_APA_Result *result)
                 }
                 else
                 {
-                    /* resize the curren allocation ...*/
+                    /* resize the current allocation ...*/
                     fv->capacity = fv->capacity * 2;
                     fv->values = umn_arena_realloc(arena, fv->values, (sizeof(char *)) * fv->capacity);
                     assert(fv->values != NULL);
@@ -178,14 +177,14 @@ int umn_apa_parse(struct UMN_Arena *arena, struct UMN_APA_Result *result)
                 fv->count = value_idx;
                 size_t prev_arg_len = strlen(fv->values[value_idx]);
 
-                fv->values[value_idx] = s = umn_arena_realloc(arena, fv->values[value_idx], prev_arg_len + arg_len + 1);
+                fv->values[value_idx] = s = umn_arena_realloc(arena, fv->values[value_idx], prev_arg_len + arg_len + 2);
                 s += prev_arg_len;
                 s[0] = ' ';
                 s++;
             }
             else
             {
-                fv->values[fv->count] = s = umn_arena_alloc(arena, arg_len + 1);
+                fv->values[fv->count] = s = umn_arena_alloc(arena, arg_len + 2);
             }
 
             assert(s != NULL);
