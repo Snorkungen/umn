@@ -361,6 +361,13 @@ umn_tokeniser_get(struct UMN_Tokeniser *t)
             }
         }
     str_to_int:
+        /* Validate that there isn't some kind of error */
+        if ((token.end - token.begin) <= 2 && str_encoding != 8 && str_encoding != 10)
+        {
+            t->position = token.end + 1;
+            return (struct UMN_Token){.kind = UMN_KIND_ERROR, .begin = token.begin, .end = t->position};
+        }
+
         /* move tokeniser position */
         t->position = token.end;
         int offset;

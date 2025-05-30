@@ -88,8 +88,13 @@ int main(int argc, char **argv)
             tokeniser.data_length = strlen(tokeniser.data);
 
             struct UMN_Token token = umn_tokeniser_get(&tokeniser);
-            while (!umn_kind_compare(token.kind, UMN_KIND_EOF) && !umn_kind_compare(token.kind, UMN_KIND_ERROR))
+            while (!umn_kind_compare(token.kind, UMN_KIND_EOF))
             {
+                if (umn_kind_compare(token.kind, UMN_KIND_ERROR)) {
+                    umn_parse_print_error(&tokeniser, token);
+                    token = umn_tokeniser_get(&tokeniser);
+                    continue;
+                }
                 if (!umn_kind_compare(token.kind, UMN_KIND_INTEGER))
                 {
                     /* ignore token */;
