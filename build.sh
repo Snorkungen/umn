@@ -1,4 +1,4 @@
 # /usr/bin/sh
 
 mkdir -p ./.build
-cc ./src/main.c -o ./.build/umn
+cc -s -O3 ./src/main.c -o ./.build/umn
