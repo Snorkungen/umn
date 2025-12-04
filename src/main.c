@@ -1,7 +1,7 @@
 
 #include <assert.h>
 #define UMN_LEXER_IMPL
-#include "./umn-lexer.h"
+#include "./umn/lexer.h"
 
 #if 1
 typedef struct
