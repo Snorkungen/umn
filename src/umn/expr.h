@@ -3,6 +3,7 @@
 
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
+#include "./utils.h"
 #include "./lexer.h"
 
 static umn_Symbol umn_expr_symbols[] = {
@@ -11,51 +12,152 @@ static umn_Symbol umn_expr_symbols[] = {
     {")"},
     {"+", .attrs.data = 1},
     {"*", .attrs.data = 2},
+    {"**", .attrs.data = 3},
 };
 
-typedef struct
+typedef struct umn_PNode
 {
-    int64_t lvalue, rvalue;
-    size_t unit;
-} umn_Expr_Node;
+    umn_Token token;
+    struct umn_PNode *lvalue; /* just use a bag of things */
+    struct umn_PNode *rvalue;
+} umn_PNode;
 
-typedef struct
-{
-    size_t count, capacity;
-    umn_Expr_Node *items;
-} umn_Expr_Stack;
+#define umn_pnode_prec(nodeptr) (nodeptr)->token.d.symbol.data
 
-umn_Expr_Node *umn_expr_stack_allocate(umn_Expr_Stack *stack)
+void umn_pnode_print_recurse(const umn_Lexer *lexer, umn_PNode *root)
 {
-    assert(stack->count < stack->capacity);
-    memset((stack->items + stack->count), 0, sizeof(*stack->items));
-    return &stack->items[stack->count++];
-}
+    char buffer[1U << 7];
 
-/* 1st just figure out how to calculate, worry about allocating a binary tree */
-int64_t umn_expr_compute__calculate(const umn_Expr_Node *node)
-{
-#define __calculate_compute__ 1
-    switch (node->unit)
+    if (root == NULL)
+        return;
+
+    umn_token_strncpy(lexer, &root->token, buffer, sizeof(buffer));
+
+    if (root->lvalue == NULL)
     {
-    case 1:
-#if __calculate_compute__
-        printf("%ld + %ld\n", node->lvalue, node->rvalue);
-#endif
-        return node->lvalue + node->rvalue;
-    case 2:
-#ifdef __calculate_compute__
-        printf("%ld * %ld\n", node->lvalue, node->rvalue);
-#endif
-        return node->lvalue * node->rvalue;
+        printf("%s", buffer);
     }
-#undef __calculate_compute__
-    assert(0);
+    else
+    {
+        printf("(");
+        umn_pnode_print_recurse(lexer, root->lvalue);
+        printf(" %s ", buffer);
+        umn_pnode_print_recurse(lexer, root->rvalue);
+        printf(")");
+    }
 }
-
-int64_t umn_expr_compute(char *inp)
+/* @see https://github.com/Snorkungen/expression/blob/master/interact.py#L423 */
+void umn_pnode_print(const umn_Lexer *lexer, umn_PNode *root)
 {
 
+    // umn_pnode_print_recurse(lexer, root);
+    // puts("");
+    // return;
+    // puts("Printing tree:");
+
+    struct
+    {
+        size_t count, capacity;
+        umn_PNode *items[16 << 2];
+    } stack = {0};
+    stack.count = 0, stack.capacity = ARRAY_LEN(stack.items);
+    struct
+    {
+        size_t count, capacity;
+        size_t items[ARRAY_LEN(stack.items) * 2];
+    } stack_depth = {0};
+    stack_depth.count = 0, stack_depth.capacity = ARRAY_LEN(stack_depth.items);
+
+    size_t depth_map = 0;
+    int depth;
+    umn_PNode *curr = NULL;
+    umn_slice_push(stack, root);
+    umn_slice_push(stack_depth, 0);
+
+    while (stack.count > 0 && (curr = umn_slice_pop(stack)) != NULL)
+    {
+        depth_map = umn_slice_pop(stack_depth);
+        depth = 0;
+
+        while ((depth_map >> depth) > 0)
+            depth += 1;
+
+        for (int i = 0; i < (depth - 1); i++)
+        {
+            if (depth_map & (1 << i))
+                printf("│  ");
+            else
+                printf("   ");
+        }
+
+        if (depth > 0 && (stack_depth.count == 0 || stack_depth.items[stack_depth.count - 1] < depth_map))
+            printf("└──");
+        else if (depth > 0)
+            printf("├──");
+
+        umn_token_print(lexer, &curr->token);
+
+        if (depth >= 1 && (stack_depth.items[stack_depth.count - 1] & (1 << (depth - 1))) == 0)
+            depth_map ^= 1UL << (depth - 1);
+
+        // depth_map = (depth_map | (1 << (depth))) ^ (1UL << (depth > 0 ? depth - 1 : 0));
+        if (curr->rvalue)
+        {
+            umn_slice_push(stack, curr->rvalue);
+            umn_slice_push(stack_depth, depth_map | (1 << (depth)));
+        }
+
+        if (curr->lvalue)
+        {
+            umn_slice_push(stack, curr->lvalue);
+            umn_slice_push(stack_depth, depth_map | (1 << (depth)));
+        }
+    }
+}
+
+uint64_t umn_pnode_compute(const umn_Lexer *lexer, umn_PNode *root)
+{
+    assert(root != NULL);
+
+    if (root->token.kind == UMN_KINTEGER)
+    {
+        return umn_token_readi(lexer, &root->token);
+    }
+    uint64_t res, lv = umn_pnode_compute(lexer, root->lvalue), rv = umn_pnode_compute(lexer, root->rvalue);
+
+    if (umn_token_issymbol(lexer, &root->token, "+"))
+        res = lv + rv;
+    else if (umn_token_issymbol(lexer, &root->token, "*"))
+        res = lv * rv;
+    else if (umn_token_issymbol(lexer, &root->token, "**"))
+    {
+        res = 1;
+        for (unsigned int i = 0; i < rv; i++)
+            res *= lv;
+    }
+    else
+    {
+        UMN_TODO("handle the operator");
+    }
+    return res;
+}
+
+umn_PNode *umn_expr_parse__set_value(umn_PNode *dest_node, umn_PNode *value)
+{
+    if (dest_node->lvalue == NULL)
+        dest_node->lvalue = value;
+    else if (dest_node->rvalue == NULL)
+        dest_node->rvalue = value;
+    else
+        return NULL;
+    return value;
+}
+
+int umn_expr_parse(const char *inp)
+{
+    puts(inp);
+
+    umn_Token token;
     umn_Lexer lexer = {
         .data = inp,
         .data_len = strlen(inp),
@@ -63,138 +165,155 @@ int64_t umn_expr_compute(char *inp)
         .symbol_count = ARRAY_LEN(umn_expr_symbols),
     };
 
-    umn_Token token;
+    UMN_SLAB_T(umn_PNode)
+    nodes = {0};
 
-    bool expect_value = true;
-    umn_Expr_Node __nodes__[16] = {0};
-    umn_Expr_Stack stack = {.items = __nodes__, .capacity = ARRAY_LEN(__nodes__)};
-    umn_Expr_Node *curr = NULL;
-
-    curr = umn_expr_stack_allocate(&stack); /* allocate a default thing */
-    size_t base_count = stack.count;
-
-    size_t __counts__[16] = {0};
     struct
     {
         size_t count, capacity;
-        size_t *items;
-    } counts = {.items = __counts__, .capacity = ARRAY_LEN(__counts__)};
+        umn_PNode *items[64]; /* just by default allow for so many because reasons */
+    } stack;
+    stack.count = 0, stack.capacity = ARRAY_LEN(stack.items); /* init stack */
 
-    base_count = counts.items[counts.count++] = stack.count; /* push */
-
-    while (umn_lexer_peek(&lexer, &token) == 0)
+    /* store the bracket  locations */
+    struct
     {
-        if (token.kind == UMN_KEOF)
+        size_t count, capacity;
+        int items[ARRAY_LEN(stack.items) >> 2];
+    } bracket_stack;
+    bracket_stack.count = 0, bracket_stack.capacity = ARRAY_LEN(stack.items); /* init stack */
+
+    /* initialize the state */
+    bool expect_value = true;
+    /* push default values */
+    umn_slice_push(stack, umn_slab_alloc(nodes));
+    umn_slice_push(bracket_stack, stack.count);
+
+    while (umn_lexer_next(&lexer, &token) == 0)
+    {
+        if (token.kind == UMN_KEOF || (token.kind & UMN_KERR))
             break;
-        if (umn_token_issymbol(&lexer, &token, "("))
-        {
-            /* now I remember we must add empty things to pad the thing */
-            curr = umn_expr_stack_allocate(&stack); /* just append an empty thing for the vibes */
 
-            assert(counts.count < counts.capacity);
-            base_count = counts.items[counts.count++] = stack.count /* push */;
-
-            umn_lexer_take(&lexer, &token);
+        if (expect_value && umn_token_issymbol(&lexer, &token, "("))
+        { /* push an empty node onto the stack */
+            umn_slice_push(stack, umn_slab_alloc(nodes));
+            umn_slice_push(bracket_stack, stack.count);
             continue;
         }
-        else if (umn_token_issymbol(&lexer, &token, ")"))
+        else if (!expect_value && umn_token_issymbol(&lexer, &token, ")"))
         {
-            assert(counts.count > 0);
-            base_count = counts.items[--counts.count - 1]; /* pop */
-
-            for (int i = base_count; i < stack.count && stack.items[i].unit > 0; i++)
-            {
-                (stack.items + i)->lvalue = stack.items[base_count].lvalue;
-                stack.items[base_count].lvalue = umn_expr_compute__calculate((stack.items + i));
-            }
-
-            if (stack.items[base_count - 1].unit)
-            {
-                stack.items[base_count - 1].rvalue = stack.items[base_count].lvalue;
-            }
-            else
-            {
-                stack.items[base_count - 1].lvalue = stack.items[base_count].lvalue;
-                stack.items[base_count - 1].unit = 0;
-            }
-            
-            stack.count = base_count; /* reset, retain first element */
-            curr = &stack.items[stack.count - 1];
-
-            umn_lexer_take(&lexer, &token);
-            continue;
-        }
-        else if (!expect_value)
-        { /* expect a unit*/
-            if (token.kind != UMN_KSYMBOL || token.d.symbol.data == 0)
+            if (bracket_stack.count <= 1)
             {
                 token.kind |= UMN_KERR;
                 break;
             }
 
-            if (curr->unit > 0)
-                curr = umn_expr_stack_allocate(&stack);
+            /* reconcile */
+            int base_count = umn_slice_pop(bracket_stack);
+            umn_PNode *tmp = umn_slice_at(stack, base_count - 1);
 
-            curr->unit = token.d.symbol.data;
+            for (int i = base_count - 1; i < stack.count - 1 && umn_slice_at(stack, i)->token.kind; i++)
+            {
+                assert(umn_pnode_prec(umn_slice_at(stack, i)) < umn_pnode_prec(umn_slice_at(stack, i + 1)));
+                assert(umn_slice_at(stack, i)->rvalue == NULL);
+                umn_slice_at(stack, i)->rvalue = umn_slice_at(stack, i + 1);
+            }
+
+            if (umn_slice_at(stack, base_count - 1)->token.kind == 0)
+            {
+                /* promote lvalue to the token value */
+                assert(umn_slice_at(stack, base_count - 1)->rvalue == NULL);
+                memcpy(&umn_slice_at(stack, base_count - 1)->token,
+                       &umn_slice_at(stack, base_count - 1)->lvalue->token, sizeof(token));
+                umn_slice_at(stack, base_count - 1)->lvalue = NULL;
+
+                /* #LEAKING A NODE, new allocator might be better  */
+            }
+
+            stack.count = base_count - 1;
+            assert(umn_expr_parse__set_value(umn_slice_at(stack, -1), tmp) != NULL);
+            continue;
         }
         else if (expect_value)
-        { /* expect value */
+        {
             if (token.kind != UMN_KINTEGER)
             {
                 token.kind |= UMN_KERR;
                 break;
             }
 
-            if (stack.count == base_count && curr->unit == 0)
-            {
-                curr->lvalue = umn_token_readi(&lexer, &token);
-                printf("lvalue = %ld\n", curr->lvalue);
+            umn_PNode *tmp = umn_expr_parse__set_value(
+                umn_slice_at(stack, -1),
+                umn_slab_alloc(nodes));
+            assert(tmp != NULL);
+            memcpy(&tmp->token, &token, sizeof(token));
+        }
+        else if (!expect_value && umn_slice_at(stack, -1)->token.kind == 0)
+        {
+            memcpy(&umn_slice_at(stack, -1)->token, &token, sizeof(token));
+        }
+        else if (!expect_value)
+        {
+            int base_count = umn_slice_at(bracket_stack, -1);
+
+            umn_slice_push(stack, umn_slab_alloc(nodes));
+            memcpy(&umn_slice_at(stack, -1)->token, &token, sizeof(token));
+
+            if (stack.count > (base_count) && umn_pnode_prec(umn_slice_at(stack, -2)) < umn_pnode_prec(umn_slice_at(stack, -1)))
+            { /* higher prec */ /* steal the previous rvalue i.e [(2 + 3) * ] -> [2 + (3 * ) ] */
+                umn_slice_at(stack, -1)->lvalue = umn_slice_at(stack, -2)->rvalue;
+                umn_slice_at(stack, -2)->rvalue = NULL;
             }
-            else if (stack.count > (base_count) && (curr - 1)->unit < curr->unit)
-            { /* the previous has a lower precedence, so current uses that ones rvalue */
-                curr->lvalue = (curr - 1)->rvalue;
-                curr->rvalue = umn_token_readi(&lexer, &token);
-                (curr - 1)->rvalue = umn_expr_compute__calculate(curr);
-                
-                curr = &stack.items[(--stack.count) - 1]; /* pop the stack */
+            else if (stack.count > (base_count) && umn_pnode_prec(umn_slice_at(stack, -2)) == umn_pnode_prec(umn_slice_at(stack, -1)))
+            { /* set the lvalue */
+                umn_slice_at(stack, -1)->lvalue = umn_slice_at(stack, -2);
+                umn_slice_at(stack, -2) = umn_slice_at(stack, -1);
+                umn_slice_pop(stack);
             }
-            else if (stack.count > base_count)
-            { /* the prec is lower so reduce the stack thing ... */
-                for (int i = (base_count - 1); i < (stack.count - 1); i++)
+            else if (stack.count > (base_count) && umn_pnode_prec(umn_slice_at(stack, -2)) > umn_pnode_prec(umn_slice_at(stack, -1)))
+            { /* equal or lower prec */
+                for (int i = stack.count - 2; i >= base_count; i--)
                 {
-                    (stack.items + i)->lvalue = stack.items[base_count - 1].lvalue;
-                    stack.items[base_count - 1].lvalue = umn_expr_compute__calculate((stack.items + i));
+                    assert(umn_pnode_prec(umn_slice_at(stack, i - 1)) <= umn_pnode_prec(umn_slice_at(stack, i)));
+                    assert(umn_slice_at(stack, i - 1)->rvalue == NULL);
+                    umn_slice_at(stack, i - 1)->rvalue = umn_slice_at(stack, i);
                 }
-                
-                stack.count = base_count - 1; /* reset, retain first element */
-                stack.items[stack.count].unit = curr->unit;
-                stack.items[stack.count].rvalue = umn_token_readi(&lexer, &token);
-                curr = &stack.items[stack.count++];
+
+                umn_slice_at(stack, -1)->lvalue = umn_slice_at(stack, base_count - 1);
+                umn_slice_at(stack, base_count - 1) = umn_slice_at(stack, -1);
+                stack.count = base_count;
             }
             else
             {
-                curr->rvalue = umn_token_readi(&lexer, &token);
-                printf("rvalue = %ld\n", curr->rvalue);
+                UMN_TODO("HANDLE THIS CASE");
             }
         }
 
-        expect_value = !expect_value; /* flip flop */
-        umn_lexer_take(&lexer, &token);
+        expect_value = !expect_value;
     }
 
     assert((token.kind & UMN_KERR) == 0);
-    assert(stack.count > 0);
+    assert(bracket_stack.count == 1 && umn_slice_at(bracket_stack, 0) == 1);
 
-    for (int i = 0; i < stack.count && stack.items[i].unit > 0; i++)
+    /* a better way would be a two step approach decrement until hits something with a higher prec  */
+
+    if (stack.count > 1)
     {
-        (stack.items + i)->lvalue = stack.items[0].lvalue;
-        stack.items[0].lvalue = umn_expr_compute__calculate((stack.items + i));
+        for (int i = stack.count - 1; i > 0; i--)
+        {
+            assert(umn_pnode_prec(umn_slice_at(stack, i - 1)) <= umn_pnode_prec(umn_slice_at(stack, i)));
+            assert(umn_slice_at(stack, i - 1)->rvalue == NULL);
+            umn_slice_at(stack, i - 1)->rvalue = umn_slice_at(stack, i);
+        }
+
+        stack.count = 1;
     }
-    /* YOLO: this is not going to work first try ... PLS segfault */
 
-    printf("%s = %lu\n", inp, stack.items[0].lvalue);
+    // umn_pnode_print(&lexer, umn_slice_at(stack, 0));
+    umn_pnode_print_recurse(&lexer, umn_slice_at(stack, 0));
+    printf(" = %zu\n", umn_pnode_compute(&lexer, umn_slice_at(stack, 0)));
 
-    return stack.items[0].lvalue;
+    return 0;
 }
 
 #endif

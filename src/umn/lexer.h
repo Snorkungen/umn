@@ -31,7 +31,7 @@ typedef struct
 
 typedef struct
 {
-  char *s; /* symbol could be casted to (char *) */
+  const char *s; /* symbol could be casted to (char *) */
   int length;
   umn_Symbol_Attrs attrs;
 } umn_Symbol;
@@ -62,7 +62,7 @@ typedef struct
   umn_Symbol_Attrs symbol_attrs;
 
   size_t data_len;
-  char *data;
+  char const *data;
 } umn_Lexer;
 
 static const umn_Token_Kind UMN_KEOF = 0,
@@ -352,7 +352,7 @@ int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
 
 int64_t umn_token_readi(const umn_Lexer *lexer, const umn_Token *token)
 {
-  char *s_beg = lexer->data + token->begin;
+  char const *s_beg = lexer->data + token->begin;
   char *s_end = (char *)s_beg + token->length;
 
   switch (token->d.encoding)
@@ -370,7 +370,7 @@ int64_t umn_token_readi(const umn_Lexer *lexer, const umn_Token *token)
 
 double umn_token_readf(const umn_Lexer *lexer, const umn_Token *token)
 {
-  char *s_beg = lexer->data + token->begin;
+  char const *s_beg = lexer->data + token->begin;
   char *s_end = (char *)s_beg + token->length;
 
   return strtod(s_beg, &s_end);
@@ -476,4 +476,3 @@ void umn_token_print_error(const umn_Lexer *lexer, const umn_Token *token)
 
 #endif
 #endif
-

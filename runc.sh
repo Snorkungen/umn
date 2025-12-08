@@ -2,6 +2,18 @@ mkdir -p .tmp
 NAME=$1
 shift 1
 
+
 cc --std=c99 -pedantic -Werror -o "./.tmp/$NAME" ./src/$NAME.c
-./.tmp/"$NAME" "$@"
+
+if [ -z ${DIFF+x} ]; then
+    ./.tmp/"$NAME" "$@"
+else
+    mv "./.tmp/$NAME.new" "./.tmp/$NAME.old" 
+    ./.tmp/"$NAME" "$@" > "./.tmp/$NAME.new"
+    
+    cat "./.tmp/$NAME.new" 
+    echo "\nDIFF REPORT\n"
+    diff "./.tmp/$NAME.new" "./.tmp/$NAME.old" 
+fi
+
 rm "./.tmp/$NAME"
