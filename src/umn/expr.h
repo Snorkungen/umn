@@ -219,7 +219,8 @@ int umn_expr_parse(const char *inp)
                 umn_slice_at(stack, i)->rvalue = umn_slice_at(stack, i + 1);
             }
 
-            if (umn_slice_at(stack, base_count - 1)->token.kind == 0)
+            if (umn_slice_at(stack, base_count - 1)->token.kind == 0 &&
+                (base_count - 1) == umn_slice_at(bracket_stack, -1))
             {
                 /* promote lvalue to the token value */
                 assert(umn_slice_at(stack, base_count - 1)->rvalue == NULL);
@@ -227,7 +228,12 @@ int umn_expr_parse(const char *inp)
                        &umn_slice_at(stack, base_count - 1)->lvalue->token, sizeof(token));
                 umn_slice_at(stack, base_count - 1)->lvalue = NULL;
 
-                /* #LEAKING A NODE, new allocator might be better  */
+                if (nodes.count && umn_slice_at(nodes, -1).count)
+                {
+                    umn_slice_pop(umn_slice_at(nodes, -1));
+                    if (umn_slice_at(nodes, -1).count == 0)
+                        umn_slice_pop(nodes);
+                }
             }
 
             stack.count = base_count - 1;

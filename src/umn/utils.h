@@ -15,7 +15,7 @@
     } while (0)
 
 /* The fundamental data structure is what i'm calling a slice */
-#define UMN_SLICE_T(Type)         \
+#define UMN_SLICE_T(Type)       \
     struct                      \
     {                           \
         size_t count, capacity; \
@@ -46,9 +46,9 @@
 /* Experiment with the slab allocator thingy ... */
 /* An implementation of a slab allocator which is just essentially a slice of slices ... */
 #define UMN_SLAB_T(Type)           \
-    struct                       \
-    {                            \
-        size_t count, capacity;  \
+    struct                         \
+    {                              \
+        size_t count, capacity;    \
         UMN_SLICE_T(Type) * items; \
     }
 
