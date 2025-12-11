@@ -144,6 +144,8 @@ uint64_t umn_pnode_compute(const umn_Lexer *lexer, umn_PNode *root)
 
 umn_PNode *umn_expr_parse__set_value(umn_PNode *dest_node, umn_PNode *value)
 {
+    assert(value != NULL);
+
     if (dest_node->lvalue == NULL)
         dest_node->lvalue = value;
     else if (dest_node->rvalue == NULL)
@@ -186,7 +188,8 @@ int umn_expr_parse(const char *inp)
     /* initialize the state */
     bool expect_value = true;
     /* push default values */
-    umn_slice_push(stack, umn_slab_alloc(nodes));
+    assert(
+        umn_slice_push(stack, umn_slab_alloc(nodes)) != NULL);
     umn_slice_push(bracket_stack, stack.count);
 
     while (umn_lexer_next(&lexer, &token) == 0)
@@ -196,7 +199,8 @@ int umn_expr_parse(const char *inp)
 
         if (expect_value && umn_token_issymbol(&lexer, &token, "("))
         { /* push an empty node onto the stack */
-            umn_slice_push(stack, umn_slab_alloc(nodes));
+            assert(
+                umn_slice_push(stack, umn_slab_alloc(nodes)) != NULL);
             umn_slice_push(bracket_stack, stack.count);
             continue;
         }
@@ -261,8 +265,8 @@ int umn_expr_parse(const char *inp)
         else if (!expect_value)
         {
             int base_count = umn_slice_at(bracket_stack, -1);
-
-            umn_slice_push(stack, umn_slab_alloc(nodes));
+            assert(
+                umn_slice_push(stack, umn_slab_alloc(nodes)) != NULL);
             memcpy(&umn_slice_at(stack, -1)->token, &token, sizeof(token));
 
             if (stack.count > (base_count) && umn_pnode_prec(umn_slice_at(stack, -2)) < umn_pnode_prec(umn_slice_at(stack, -1)))

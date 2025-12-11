@@ -58,29 +58,28 @@ typedef UMN_SLAB_T(void) umn_Slab_Generic;
 void *umn_slab_alloc_generic(umn_Slab_Generic *slab, size_t item_size);
 #define umn_slab_alloc(slab) umn_slab_alloc_generic((umn_Slab_Generic *)&slab, sizeof((*(*slab.items).items)))
 
+
 inline void *umn_slab_alloc_generic(umn_Slab_Generic *slab, size_t item_size)
 {
-    umn_slice_reserve((*slab), 1); /* assumes malloc zero initializes the data ... */
-    assert(slab->items != NULL);
-
-    UMN_SLICE_T(void) *slice = (void *)&umn_slice_at((*slab), -1);
-
-    if (slice->capacity == 0)
-    { /* initialize a new slab ... */
-        umn_slice_at((*slab), -1).capacity = UMN_SLAB_SIZE * ((slab->count + 1));
-        umn_slice_at((*slab), -1).items = malloc(umn_slice_at((*slab), -1).capacity * item_size);
-        assert(umn_slice_at((*slab), -1).items != NULL);
-        memset(umn_slice_at((*slab), -1).items, 0, umn_slice_at((*slab), -1).capacity * item_size);
-    }
-
-    if (umn_slice_at((*slab), -1).count < umn_slice_at((*slab), -1).capacity)
+    /* handle base case */
+    if (slab->count == 0 || umn_slice_at((*slab), -1).count == umn_slice_at((*slab), -1).capacity)
     {
-        umn_slice_at((*slab), -1).count++;
-        return (void *)((char *)umn_slice_at((*slab), -1).items + item_size * umn_slice_at((*slab), -1).count);
+        slab->count++;
+        umn_slice_reserve((*slab), 0);
+        if (slab->items == NULL)
+            return NULL;
+
+        /* allocate the block for the slot */
+
+        umn_slice_at((*slab), -1).count = 0;
+        umn_slice_at((*slab), -1).capacity = UMN_SLAB_SIZE;
+        umn_slice_at((*slab), -1).items = malloc(umn_slice_at((*slab), -1).capacity * item_size);
+
+        if (umn_slice_at((*slab), -1).items == NULL)
+            return NULL;
     }
 
-    slab->count += 1;
-    return umn_slab_alloc_generic(slab, item_size);
+    umn_slice_at((*slab), -1).count++;
+    return (void *)(&((char *)umn_slice_at((*slab), -1).items)[(umn_slice_at((*slab), -1).count - 1) * item_size]);
 }
-
 #endif
