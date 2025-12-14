@@ -69,11 +69,15 @@ static const umn_Token_Kind UMN_KEOF = 0,
                             UMN_KERR = (~(((umn_Token_Kind)-1) >> 4)),
                             UMN_KERR_SEP = (~(((umn_Token_Kind)-1) >> 3));
 
-/* Used by users of the file */
-static const umn_Token_Kind UMN_K__1 = 0x10000,
+static const umn_Token_Kind UMN_K__RESERVED__ = 0xFF0000,
+                            UMN_K__1 = 0x10000,
                             UMN_K__2 = UMN_K__1 << 1,
                             UMN_K__3 = UMN_K__1 << 2,
-                            UMN_K__4 = UMN_K__1 << 3;
+                            UMN_K__4 = UMN_K__1 << 3,
+                            UMN_K__5 = UMN_K__1 << 4,
+                            UMN_K__6 = UMN_K__1 << 5,
+                            UMN_K__7 = UMN_K__1 << 6,
+                            UMN_K__8 = UMN_K__1 << 7;
 
 static const umn_Token_Kind UMN_KSTRING = 0x400,
                             UMN_KLITERAL = 0x200,
@@ -280,7 +284,7 @@ int umn_lexer_take(umn_Lexer *lexer, const umn_Token *token)
   return 0;
 }
 
-int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
+inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
 {
   if (UMN_KLITERAL != token->kind || token->length == 0)
     return -1;
@@ -408,7 +412,7 @@ inline int umn_token_is(const umn_Lexer *lexer, const umn_Token *a, const umn_To
 
 inline int umn_token_issymbol(const umn_Lexer *lexer, const umn_Token *token, const char *literal)
 {
-  return token->kind == UMN_KSYMBOL && (umn_token_litcmp(lexer, token, literal) == 0);
+  return (token->kind & (~UMN_K__RESERVED__)) == UMN_KSYMBOL && (umn_token_litcmp(lexer, token, literal) == 0);
 }
 
 void umn_token_print(const umn_Lexer *lexer, const umn_Token *token)
@@ -417,8 +421,8 @@ void umn_token_print(const umn_Lexer *lexer, const umn_Token *token)
 
   {
 
-#define __str_macro__(KIND)                \
-  if (KIND == (token->kind & (~UMN_KERR))) \
+#define __str_macro__(KIND)                                    \
+  if (KIND == (token->kind & (~UMN_KERR ^ UMN_K__RESERVED__))) \
     strncpy(kind, #KIND, sizeof(kind));
 
     __str_macro__(UMN_KEOF);

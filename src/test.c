@@ -10,14 +10,15 @@ int main(void)
     /* LILVODKA REQUIRES,  -I=core sqrt(x), pow(b, e), ln(x), .... */
 
     umn_expr_pnode_slab_t nodes = {0};
-    umn_Lexer lexer = __MACRO__umn_lexer_init("f(a, b, c) = (x + y) * (x + y)", umn_expr_symbols); /* recursion is not allowed */
+    umn_Lexer lexer = __MACRO__umn_lexer_init("f(x, y) = (x + y) * (x + y)", umn_expr_symbols); /* recursion is not allowed */
 
-    umn_PNode *res = umn_expr_parse_func(&lexer, &nodes);
-    if (res->token.kind & UMN_KERR)
+    umn_PNode *res = umn_expr_parse(&nodes, &lexer);
+
+    if (res)
     {
-        umn_token_print_error(&lexer, &res->token);
-        puts("failed ...");
-        abort();
+        umn_pnode_print(&lexer, res);
+        umn_pnode_print_recurse(&lexer, res);
+        putchar(10);
     }
 
     /*
@@ -68,7 +69,7 @@ int main(void)
 
         puts("---------------------------------------");
         puts(lexer.data);
-        res = umn_expr_parse_actual_thing_that_does_stuff(&nodes, &lexer);
+        res = umn_expr_parse(&nodes, &lexer);
         int64_t value = umn_pnode_compute(&lexer, res);
         umn_pnode_print_recurse(&lexer, res);
         printf(" = %ld\n", umn_pnode_compute(&lexer, res));

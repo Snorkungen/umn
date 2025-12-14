@@ -10,7 +10,7 @@
 #define UMN_TODO(msg)                                        \
     do                                                       \
     {                                                        \
-        printf("%s%d: TODO(%s)\n", __FILE__, __LINE__, msg); \
+        printf("%s:%d: TODO(%s)\n", __FILE__, __LINE__, msg); \
         abort();                                             \
     } while (0)
 
