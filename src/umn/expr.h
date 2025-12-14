@@ -22,6 +22,8 @@ typedef struct umn_PNode
     struct umn_PNode *rvalue;
 } umn_PNode;
 
+typedef UMN_SLAB_T(umn_PNode) umn_expr_pnode_slab_t;
+
 #define umn_pnode_prec(nodeptr) (nodeptr)->token.d.symbol.data
 
 void umn_pnode_print_recurse(const umn_Lexer *lexer, umn_PNode *root)
@@ -115,7 +117,7 @@ void umn_pnode_print(const umn_Lexer *lexer, umn_PNode *root)
     }
 }
 
-uint64_t umn_pnode_compute(const umn_Lexer *lexer, umn_PNode *root)
+int64_t umn_pnode_compute(const umn_Lexer *lexer, umn_PNode *root)
 {
     assert(root != NULL);
 
@@ -123,7 +125,7 @@ uint64_t umn_pnode_compute(const umn_Lexer *lexer, umn_PNode *root)
     {
         return umn_token_readi(lexer, &root->token);
     }
-    uint64_t res, lv = umn_pnode_compute(lexer, root->lvalue), rv = umn_pnode_compute(lexer, root->rvalue);
+    int64_t res, lv = umn_pnode_compute(lexer, root->lvalue), rv = umn_pnode_compute(lexer, root->rvalue);
 
     if (umn_token_issymbol(lexer, &root->token, "+"))
         res = lv + rv;
@@ -144,7 +146,8 @@ uint64_t umn_pnode_compute(const umn_Lexer *lexer, umn_PNode *root)
 
 umn_PNode *umn_expr_parse__set_value(umn_PNode *dest_node, umn_PNode *value)
 {
-    assert(value != NULL);
+    if (value == NULL)
+        return NULL;
 
     if (dest_node->lvalue == NULL)
         dest_node->lvalue = value;
@@ -152,13 +155,14 @@ umn_PNode *umn_expr_parse__set_value(umn_PNode *dest_node, umn_PNode *value)
         dest_node->rvalue = value;
     else
         return NULL;
+
     return value;
 }
 
+umn_PNode *umn_expr_parse_actual_thing_that_does_stuff(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer);
 int umn_expr_parse(const char *inp)
 {
     puts(inp);
-
     umn_Token token;
     umn_Lexer lexer = {
         .data = inp,
@@ -167,9 +171,45 @@ int umn_expr_parse(const char *inp)
         .symbol_count = ARRAY_LEN(umn_expr_symbols),
     };
 
-    UMN_SLAB_T(umn_PNode)
-    nodes = {0};
+    umn_expr_pnode_slab_t nodes = {0};
 
+    umn_PNode *res = umn_expr_parse_actual_thing_that_does_stuff(&nodes, &lexer);
+    umn_pnode_print(&lexer, res);
+
+    umn_pnode_print_recurse(&lexer, res);
+    printf(" = %ld\n", umn_pnode_compute(&lexer, res));
+}
+
+/* NOTE: this function will crash the program rather than return an invalid node */
+umn_PNode *umn_pnode_alloc(umn_expr_pnode_slab_t *nodes, const umn_Token *token)
+{
+    umn_PNode *res = umn_slab_alloc((*nodes));
+
+    if (res == NULL)
+        UMN_TODO("malloc failed");
+
+    if (token)
+        memcpy(&res->token, token, sizeof(*token));
+
+    return res;
+}
+
+int umn_pnode_free_last_allocated_node(umn_expr_pnode_slab_t *nodes)
+{
+    if (nodes->count == 0 || umn_slice_at((*nodes), -1).count == 0)
+        return -1;
+
+    umn_slice_pop(
+        umn_slice_at((*nodes), -1));
+
+    if (umn_slice_at((*nodes), -1).count == 0)
+        umn_slice_pop((*nodes));
+
+    return 0;
+}
+
+umn_PNode *umn_expr_parse_actual_thing_that_does_stuff(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer)
+{
     struct
     {
         size_t count, capacity;
@@ -188,23 +228,23 @@ int umn_expr_parse(const char *inp)
     /* initialize the state */
     bool expect_value = true;
     /* push default values */
-    assert(
-        umn_slice_push(stack, umn_slab_alloc(nodes)) != NULL);
+
+    umn_slice_push(stack, umn_pnode_alloc(nodes, NULL));
     umn_slice_push(bracket_stack, stack.count);
 
-    while (umn_lexer_next(&lexer, &token) == 0)
+    umn_Token token;
+    while (umn_lexer_next(lexer, &token) == 0)
     {
         if (token.kind == UMN_KEOF || (token.kind & UMN_KERR))
             break;
 
-        if (expect_value && umn_token_issymbol(&lexer, &token, "("))
+        if (expect_value && umn_token_issymbol(lexer, &token, "("))
         { /* push an empty node onto the stack */
-            assert(
-                umn_slice_push(stack, umn_slab_alloc(nodes)) != NULL);
+            umn_slice_push(stack, umn_pnode_alloc(nodes, NULL));
             umn_slice_push(bracket_stack, stack.count);
             continue;
         }
-        else if (!expect_value && umn_token_issymbol(&lexer, &token, ")"))
+        else if (!expect_value && umn_token_issymbol(lexer, &token, ")"))
         {
             if (bracket_stack.count <= 1)
             {
@@ -216,6 +256,7 @@ int umn_expr_parse(const char *inp)
             int base_count = umn_slice_pop(bracket_stack);
             umn_PNode *tmp = umn_slice_at(stack, base_count - 1);
 
+
             for (int i = base_count - 1; i < stack.count - 1 && umn_slice_at(stack, i)->token.kind; i++)
             {
                 assert(umn_pnode_prec(umn_slice_at(stack, i)) < umn_pnode_prec(umn_slice_at(stack, i + 1)));
@@ -223,40 +264,27 @@ int umn_expr_parse(const char *inp)
                 umn_slice_at(stack, i)->rvalue = umn_slice_at(stack, i + 1);
             }
 
-            if (umn_slice_at(stack, base_count - 1)->token.kind == 0 &&
-                (base_count - 1) == umn_slice_at(bracket_stack, -1))
+            if (tmp->token.kind == 0)
             {
-                /* promote lvalue to the token value */
-                assert(umn_slice_at(stack, base_count - 1)->rvalue == NULL);
-                memcpy(&umn_slice_at(stack, base_count - 1)->token,
-                       &umn_slice_at(stack, base_count - 1)->lvalue->token, sizeof(token));
-                umn_slice_at(stack, base_count - 1)->lvalue = NULL;
-
-                if (nodes.count && umn_slice_at(nodes, -1).count)
-                {
-                    umn_slice_pop(umn_slice_at(nodes, -1));
-                    if (umn_slice_at(nodes, -1).count == 0)
-                        umn_slice_pop(nodes);
-                }
+                assert(tmp->rvalue == NULL && tmp->lvalue);
+                memcpy(tmp, tmp->lvalue, sizeof(*tmp));
+                umn_pnode_free_last_allocated_node(nodes);
             }
 
             stack.count = base_count - 1;
-            assert(umn_expr_parse__set_value(umn_slice_at(stack, -1), tmp) != NULL);
+            if (umn_expr_parse__set_value(umn_slice_at(stack, -1), tmp) == NULL)
+                UMN_TODO("HANDLE: errors");
+
             continue;
         }
         else if (expect_value)
         {
-            if (token.kind != UMN_KINTEGER)
-            {
-                token.kind |= UMN_KERR;
-                break;
-            }
+            umn_PNode *value = NULL;
+            if (token.kind == UMN_KINTEGER)
+                value = umn_pnode_alloc(nodes, &token);
 
-            umn_PNode *tmp = umn_expr_parse__set_value(
-                umn_slice_at(stack, -1),
-                umn_slab_alloc(nodes));
-            assert(tmp != NULL);
-            memcpy(&tmp->token, &token, sizeof(token));
+            if (umn_expr_parse__set_value(umn_slice_at(stack, -1), umn_pnode_alloc(nodes, &token)) == NULL)
+                UMN_TODO("HANDLE: errors");
         }
         else if (!expect_value && umn_slice_at(stack, -1)->token.kind == 0)
         {
@@ -265,9 +293,8 @@ int umn_expr_parse(const char *inp)
         else if (!expect_value)
         {
             int base_count = umn_slice_at(bracket_stack, -1);
-            assert(
-                umn_slice_push(stack, umn_slab_alloc(nodes)) != NULL);
-            memcpy(&umn_slice_at(stack, -1)->token, &token, sizeof(token));
+
+            umn_slice_push(stack, umn_pnode_alloc(nodes, &token));
 
             if (stack.count > (base_count) && umn_pnode_prec(umn_slice_at(stack, -2)) < umn_pnode_prec(umn_slice_at(stack, -1)))
             { /* higher prec */ /* steal the previous rvalue i.e [(2 + 3) * ] -> [2 + (3 * ) ] */
@@ -302,12 +329,19 @@ int umn_expr_parse(const char *inp)
         expect_value = !expect_value;
     }
 
-    assert((token.kind & UMN_KERR) == 0);
+    if (token.kind & UMN_KERR)
+        UMN_TODO("HANDLE: errors");
+
     assert(bracket_stack.count == 1 && umn_slice_at(bracket_stack, 0) == 1);
 
-    /* a better way would be a two step approach decrement until hits something with a higher prec  */
+    if (umn_slice_at(stack, 0)->token.kind == 0)
+    {
+        assert(umn_slice_at(stack, 0)->lvalue);
+        memcpy(umn_slice_at(stack, 0), umn_slice_at(stack, 0)->lvalue, sizeof(umn_PNode));
 
-    if (stack.count > 1)
+        /* leaking a node can't be bothered because this is a bounded bounded */
+    }
+    else if (stack.count > 1)
     {
         for (int i = stack.count - 1; i > 0; i--)
         {
@@ -319,11 +353,91 @@ int umn_expr_parse(const char *inp)
         stack.count = 1;
     }
 
-    // umn_pnode_print(&lexer, umn_slice_at(stack, 0));
-    umn_pnode_print_recurse(&lexer, umn_slice_at(stack, 0));
-    printf(" = %zu\n", umn_pnode_compute(&lexer, umn_slice_at(stack, 0)));
+    return umn_slice_at(stack, 0);
+}
 
-    return 0;
+/* return the resultant node into the dest pointer thingy .. */
+umn_PNode *umn_expr_parse_func(umn_Lexer *lexer, umn_expr_pnode_slab_t *nodes)
+{
+    umn_PNode *node = umn_slab_alloc(*nodes);
+    umn_Token token;
+
+    assert(node != NULL);
+
+    if (umn_lexer_peek(lexer, &node->token)) /* non zeror means error */
+        return node;                         /* how to do errors */
+
+    if (node->token.kind != UMN_KLITERAL)
+    {
+        node->token.kind |= UMN_KERR;
+        return node;
+    }
+
+    /* commit no going back ... */
+    umn_lexer_take(lexer, &node->token);
+
+    /* the next token must be a opening bracket ..*/
+    if (umn_lexer_peek(lexer, &token) || !umn_token_issymbol(lexer, &token, "("))
+    {
+        token.kind |= UMN_KERR;
+        memcpy(&node->token, &token, sizeof(token));
+        return node;
+    }
+
+    /* commit no going back ... */
+    umn_lexer_take(lexer, &token);
+
+    while (umn_lexer_next(lexer, &token) == 0)
+    {
+        if (umn_token_issymbol(lexer, &token, ")"))
+            break;
+
+        if (token.kind != UMN_KLITERAL || token.kind == UMN_KEOF)
+        {
+            token.kind |= UMN_KERR;
+            memcpy(&node->token, &token, sizeof(token));
+            return node;
+        }
+
+        /* do the magic thing that parses a valid value */
+        /* and then add this to some local stack so that the thing can commit the thing ... */
+
+        umn_token_print(lexer, &token);
+
+        umn_lexer_peek(lexer, &token);
+        if (umn_token_issymbol(lexer, &token, ","))
+        {
+            umn_lexer_take(lexer, &token);
+            continue;
+        }
+        else if (umn_token_issymbol(lexer, &token, ")"))
+        {
+            umn_lexer_take(lexer, &token);
+            break;
+        }
+        else
+        {
+            token.kind |= UMN_KERR;
+            memcpy(&node->token, &token, sizeof(token));
+            return node;
+        }
+    }
+
+    /* I think function definition is something like */
+    /*
+                =
+               / \
+              /   \
+          f(x)     (x - 1)
+        x -> NULL
+
+
+    */
+
+    /* where f is something */
+    /* rvalue => umn_PNode ** an array of pointers so you can just memcpy from the stack or a linked list ...  */
+
+    return node;
 }
 
 #endif

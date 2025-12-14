@@ -11,7 +11,7 @@
     do                                                       \
     {                                                        \
         printf("%s%d: TODO(%s)\n", __FILE__, __LINE__, msg); \
-        exit(47);                                            \
+        abort();                                             \
     } while (0)
 
 /* The fundamental data structure is what i'm calling a slice */
@@ -35,7 +35,7 @@
 
 /* returns the value pushed */
 #define umn_slice_push(slice, v) \
-    (slice).items[assert((slice).count < (slice).capacity), (slice).count++] = v
+    ((slice).items[assert((slice).count < (slice).capacity), (slice).count++] = v)
 /* returns the value removed */
 #define umn_slice_pop(slice) \
     (slice).items[assert((slice).count > 0), --(slice).count]
@@ -56,8 +56,7 @@
 
 typedef UMN_SLAB_T(void) umn_Slab_Generic;
 void *umn_slab_alloc_generic(umn_Slab_Generic *slab, size_t item_size);
-#define umn_slab_alloc(slab) umn_slab_alloc_generic((umn_Slab_Generic *)&slab, sizeof((*(*slab.items).items)))
-
+#define umn_slab_alloc(slab) umn_slab_alloc_generic((umn_Slab_Generic *)&(slab), sizeof((*(*(slab).items).items)))
 
 inline void *umn_slab_alloc_generic(umn_Slab_Generic *slab, size_t item_size)
 {
@@ -80,6 +79,9 @@ inline void *umn_slab_alloc_generic(umn_Slab_Generic *slab, size_t item_size)
     }
 
     umn_slice_at((*slab), -1).count++;
-    return (void *)(&((char *)umn_slice_at((*slab), -1).items)[(umn_slice_at((*slab), -1).count - 1) * item_size]);
+
+    void *alllocation = (&((char *)umn_slice_at((*slab), -1).items)[(umn_slice_at((*slab), -1).count - 1) * item_size]);
+    memset(alllocation, 0, item_size);
+    return alllocation;
 }
 #endif
