@@ -1,37 +1,38 @@
-# UMN
+# UMN v026
 
-> The aim is to create a utility program to convert hexadecimal numbers to decimal and vice-versa.
+A terminal program that converts between number notations.
 
-A utility program that understands different representations of numbers and then display the numbers.
+## Usage & Features
+
+
 
 ```sh
-<PROMPT> umn -d 0x1ee7
-"0x1ee7" = 7911
+# umn [...options] -- number, number, number, ...
 
-<PROMPT> umn -x 7911
-"7911" = 0x1ee7 
+umn -boxd -- 192, 168, 1, 1
+# 192 = 0b11000000, 0300, 192, 0xc0
+# 168 = 0b10101000, 0250, 168, 0xa8
+# 1 = 0b1, 01, 1, 0x1
+# 1 = 0b1, 01, 1, 0x1
 
-<PROMPT> umn -d 7911
-"7911" = 7911 
+umn -d --decimal 0x1ee7
+# 0x1ee7 = 7911
 
-<PROMPT> umn -b 7911
-"7911" = 0b1111011100111
+umn -x --hex 7911
+# 7911 = 0x1ee7
+
+umn -d --decimal 7911
+# 7911 = 7911 
+
+umn -b --binary 7911
+# 7911 = 0b1111011100111
+
 ```
 
-> v026.0 Breaking changes
-- simplify the input interface by enforcing options being theeeee first values
-- support bitwise expressions
-- do not have to worry about operator precedence
+## Compilation
+
 ```sh
-umn [options] [expr1, expr2, exprN]
-<PROMPT> umn -db 0x1ee7
-10: "0x1EE7"=7911
- 2: "0x1EE7"=0b1111011101110
-
-<PROMPT> umn -d 0x1ee7 & 10
-10: "0x1ee7 & 10"=7690
-
-<PROMPT> umn -o 8
- 8: "8"=010
-
+# see ./build.sh
+mkdir -p ./.build
+gcc ./src/main.c -o ./.build/umn
 ```
