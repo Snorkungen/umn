@@ -5,6 +5,8 @@
 
 #define __MACRO__umn_lexer_init(__data__, __const_symbols__) {.data = __data__, .data_len = (sizeof(__data__) - 1), .symbols = __const_symbols__, .symbol_count = ARRAY_LEN(__const_symbols__)}
 
+void foo(void);
+
 int main(void)
 {
     /* LILVODKA REQUIRES,  -I=core sqrt(x), pow(b, e), ln(x), .... */
@@ -20,6 +22,9 @@ int main(void)
         umn_pnode_print_recurse(&lexer, res);
         putchar(10);
     }
+
+    foo();
+    return 0;
 
     /*
         Parse pseudo-code
@@ -43,6 +48,7 @@ int main(void)
         const char *str;
         int64_t expected;
     } tests[] = {
+        {"(2)", 2},
         {"(1) + (2)", 3},
         {"(1) + (2 * 3 + 1) ** 4 + 5", 7 * 7 * 7 * 7 + 6},
         {"1 + 2 ** 2 ", 5},
@@ -84,4 +90,57 @@ int main(void)
     }
 
     return 0;
+}
+
+void foo(void)
+{
+    umn_expr_pnode_slab_t nodes = {0};
+    /* okay the strat is to first have the options --decimal --hex --octal --bin */
+    umn_Lexer lexer = __MACRO__umn_lexer_init(" 5*1, 2 + 3, f(a,b)=a * a * (b + a)", umn_expr_symbols);
+    umn_Token token = {0};
+
+    umn_Symbol opt_symbols[] = {{"--"}, {"-"}};
+    umn_Lexer options = __MACRO__umn_lexer_init("-dx --octal", opt_symbols);
+
+    while (umn_lexer_peek(&options, &token) == 0)
+    {
+        if (umn_token_issymbol(&options, &token, "-"))
+        {
+            umn_token_print(&options, &token);
+            umn_lexer_take(&options, &token);
+
+            umn_lexer_next(&options, &token);
+            assert(token.kind == UMN_KLITERAL);
+            for (int i = 0; i < token.length; i++)
+            {
+                printf("-%c\n", options.data[token.begin + i]);
+            }
+
+            /* I have already done this read the next literal and do the thing ...*/
+        }
+        else
+        {
+            UMN_TODO(")");
+        }
+
+        /* code */
+    }
+
+    /* first attempt to read the options if there are any */
+
+    puts("fhdklsJ");
+
+    do
+    {
+        umn_PNode *node = umn_expr_parse(&nodes, &lexer);
+
+        if (node->token.kind & UMN_KERR)
+        {
+            umn_token_print(&lexer, &node->token);
+            break;
+        }
+
+        umn_pnode_print(&lexer, node);
+
+    } while (umn_lexer_next(&lexer, &token) == 0 && umn_token_issymbol(&lexer, &token, ","));
 }

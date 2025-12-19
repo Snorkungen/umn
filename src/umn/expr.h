@@ -210,6 +210,12 @@ umn_PNode *umn_expr_parse_value_fncddef(umn_expr_pnode_slab_t *nodes, umn_Lexer 
 
 umn_PNode *umn_expr_parse(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer)
 {
+    umn_Token token;
+
+    /* NOTE: this is avoiding a specific bug */
+    if (umn_lexer_peek(lexer, &token) == 0 && token.kind == UMN_KEOF)
+        return NULL;
+
     struct
     {
         size_t count, capacity;
@@ -232,7 +238,6 @@ umn_PNode *umn_expr_parse(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer)
     umn_slice_push(stack, umn_pnode_alloc(nodes, NULL));
     umn_slice_push(bracket_stack, stack.count);
 
-    umn_Token token;
     while (umn_lexer_next(lexer, &token) == 0)
     {
         if (token.kind == UMN_KEOF || (token.kind & UMN_KERR))
@@ -288,6 +293,17 @@ umn_PNode *umn_expr_parse(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer)
 
             if (umn_expr_parse__set_value(umn_slice_at(stack, -1), value) == NULL)
                 UMN_TODO("HANDLE: errors");
+        }
+        else if (!expect_value && umn_token_issymbol(lexer, &token, ","))
+        {
+            umn_lexer_give(lexer, &token);
+            break;
+        }
+        else if (!expect_value && (token.kind != UMN_KSYMBOL || token.d.symbol.data == 0 /* NOTE: this should probably be a flag */))
+        {
+            token.kind |= UMN_KERR;
+            memcpy(&umn_slice_at(stack, -1)->token, &token, sizeof(token));
+            return umn_slice_at(stack, -1);
         }
         else if (!expect_value && umn_slice_at(stack, -1)->token.kind == 0)
         {
@@ -358,6 +374,11 @@ umn_PNode *umn_expr_parse(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer)
         stack.count = 1;
     }
 
+    if (expect_value)
+    {
+        umn_slice_at(stack, 0)->token.kind |= UMN_KERR;
+    }
+
     return umn_slice_at(stack, 0);
 }
 
@@ -376,7 +397,8 @@ umn_PNode *umn_expr_parse_value_fncddef(umn_expr_pnode_slab_t *nodes, umn_Lexer 
         token->kind |= UMN_KERR;
         return NULL;
     }
-    else if ( !umn_token_issymbol(lexer, token, "(")) {
+    else if (!umn_token_issymbol(lexer, token, "("))
+    {
         return node;
     }
 

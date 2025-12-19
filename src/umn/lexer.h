@@ -89,6 +89,7 @@ static const umn_Token_Kind UMN_KNUMERIC = 0x100,
 int umn_lexer_next(umn_Lexer *lexer, umn_Token *token);
 int umn_lexer_peek(const umn_Lexer *lexer, umn_Token *token);
 int umn_lexer_take(umn_Lexer *lexer, const umn_Token *token);
+int umn_lexer_give(umn_Lexer *lexer, const umn_Token *token); /* reset the position to just before the token */
 
 void umn_token_print(const umn_Lexer *lexer, const umn_Token *token);
 
@@ -277,14 +278,21 @@ int umn_lexer_peek(const umn_Lexer *lexer, umn_Token *token)
   return umn_lexer_next(&tmp, token);
 }
 
-int umn_lexer_take(umn_Lexer *lexer, const umn_Token *token)
+inline int umn_lexer_take(umn_Lexer *lexer, const umn_Token *token)
 {
   lexer->position = token->begin + token->length;
   lexer->line_begin = token->begin - token->line_offset;
   return 0;
 }
 
-inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
+inline int umn_lexer_give(umn_Lexer *lexer, const umn_Token *token)
+{
+  lexer->position = token->begin;
+  lexer->line_begin = token->begin - token->line_offset;
+  return 0;
+}
+
+int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
 {
   if (UMN_KLITERAL != token->kind || token->length == 0)
     return -1;

@@ -26,9 +26,9 @@
 #define umn_slice_reserve(slice, __amount)                                                     \
     do                                                                                         \
     {                                                                                          \
-        if (((slice).count + __amount) >= (slice).capacity)                                    \
+        if (((slice).count + (__amount)) >= (slice).capacity)                                    \
         {                                                                                      \
-            (slice).capacity = ((slice).capacity + __amount + 1) * 2;                          \
+            (slice).capacity = ((slice).capacity + (__amount) + 1) * 2;                          \
             (slice).items = realloc((slice).items, (slice).capacity * sizeof(*(slice).items)); \
         }                                                                                      \
     } while (0)

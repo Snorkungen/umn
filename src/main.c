@@ -1,271 +1,233 @@
+/* Snorkungen 2025 umn for the next year */
 
-#include <assert.h>
-#define UMN_LEXER_IMPL
-#include "./umn/lexer.h"
-
-#if 1
-typedef struct
-{
-    size_t length, capacity;
-    char *data;
-} umn_Sb;
-
-typedef struct
-{
-    size_t count, capacity;
-    void *items;
-} umn_Da;
-int umn_da_reserve(umn_Da *da, size_t size, size_t count)
-{
-    if ((da->count + count) < da->capacity)
-        return 0;
-
-    da->capacity = da->capacity * 2 + count;
-    da->items = realloc(da->items, da->capacity * size);
-    assert(da->items);
-    return 0;
-}
-
-int umn_sb_appendc(umn_Sb *sb, const char src)
-{
-    umn_da_reserve((umn_Da *)sb, 1, 2);
-    sb->data[sb->length] = src;
-    sb->data[++sb->length] = '\0';
-    return 0;
-}
-int umn_sb_append(umn_Sb *sb, const char *src)
-{
-    int len = strlen(src);
-
-    umn_da_reserve((umn_Da *)sb, 1, len + 1);
-
-    strncpy(sb->data + sb->length, src, sb->capacity - sb->length - 1);
-    sb->length += len;
-    sb->data[sb->length] = '\0';
-    return 0;
-}
-
-typedef struct
-{
-    umn_Token token;
-    uint64_t value;
-} Expr;
-typedef struct
-{
-    size_t count, capacity;
-    Expr *items;
-} Exprs;
-
-Expr *exprs_alloc(Exprs *exprs)
-{
-    umn_da_reserve((umn_Da *)exprs, sizeof(*exprs->items), 1);
-    return &exprs->items[exprs->count++];
-}
-#endif
-
-#define ARRAY_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
-
-/* NOTE: this function does not output the correct result, values are not big-endian which is expected */
-int dec2bin(char *dest, size_t dsize, uint64_t v)
-{
-    size_t n = 0, offset = 0;
-    if (n + 2 < dsize)
-    {
-        dest[n++] = '0';
-        dest[n++] = 'b';
-    }
-
-    /* move offset until first set bit is found */
-    for (offset = 0; (v & ((0xffULL << 7 * 8)) >> ((offset) * 8)) == 0; offset++)
-    {
-        ; /* noop the above statement does some cursed B.S. */
-    }
-
-    offset = offset * 8; /* multiply byte offset to bits */
-
-    /* move offset untill it finds its first byte with a 1*/
-    while (offset <= sizeof(v) * 8)
-    {
-        if (v & (1ULL << (sizeof(v) * 8 - (++offset))))
-            break;
-    }
-
-    while (offset <= sizeof(v) * 8 && n + 1 < dsize)
-    {
-        dest[n++] = v & (1ULL << (sizeof(v) * 8 - offset++)) ? '1' : '0';
-    }
-    return 0;
-}
+#define UMN_LEXER_IMPL 1
+#include "umn/lexer.h"
+#include "umn/utils.h"
+#include "umn/expr.h"
 
 typedef enum
 {
-    Enc_Unknown,
     Enc_Bin,
     Enc_Oct,
     Enc_Dec,
     Enc_Hex,
-} Encs;
+    Enc_Last
+} Enc;
 
-static umn_Symbol options_symbols[] = {
-    {"-"},
-    {"d", .attrs.data = Enc_Dec},
-    {"b", .attrs.data = Enc_Bin},
-    {"o", .attrs.data = Enc_Oct},
-    {"x", .attrs.data = Enc_Hex},
-
-    {"--"},
-    {"decimal", .attrs.data = Enc_Dec},
-    {"binary", .attrs.data = Enc_Bin},
-    {"octal", .attrs.data = Enc_Oct},
-    {"hex", .attrs.data = Enc_Hex},
+const char ENC_MAP_S[] = {
+    [Enc_Bin] = 'b',
+    [Enc_Oct] = 'o',
+    [Enc_Dec] = 'd',
+    [Enc_Hex] = 'x',
 };
 
-static umn_Symbol symbols[] = {
-    {","}, /* expression separator */
-
-    /* The shell already uses this symbols, what could we replace this with? */ {"~"},  /* unary */
-    /* The shell already uses this symbols, what could we replace this with? */ {"|"},  /* binop OR */
-    /* The shell already uses this symbols, what could we replace this with? */ {"&"},  /* binop AND */
-    /* The shell already uses this symbols, what could we replace this with? */ {"<<"}, /* binop lshift */
-    /* The shell already uses this symbols, what could we replace this with? */ {">>"}, /* binop rshift */
+const char *ENC_MAP_L[] = {
+    [Enc_Bin] = "binary",
+    [Enc_Oct] = "octal",
+    [Enc_Dec] = "decimal",
+    [Enc_Hex] = "hex",
 };
+
+typedef struct
+{
+    umn_Lexer lexer;
+    bool output[Enc_Last];
+} Conf;
+
+typedef UMN_SLICE_T(char) umn_sb_t;
+int umn_sb_appends(umn_sb_t *sb, const char *s)
+{
+    size_t len = strlen(s);
+    umn_slice_reserve((*sb), (len + 1));
+    memcpy(sb->items + sb->count, s, len);
+    sb->count += len;
+    sb->items[sb->count] = '\0';
+    return len;
+}
+int umn_sb_appendc(umn_sb_t *sb, const char v)
+{
+    umn_slice_reserve((*sb), (2));
+    sb->items[sb->count] = v;
+    sb->items[++sb->count] = '\0';
+    return 1;
+}
+
+Conf init_conf(int argc, char **argv)
+{
+    Conf config = {0};
+
+    umn_sb_t sb = {0};
+    for (int i = 1; i < argc; i++)
+    {
+        umn_sb_appendc(&sb, ' ');
+        umn_sb_appends(&sb, argv[i]);
+    }
+
+    umn_Token token;
+    static umn_Symbol symbols[] = {{"-"}, {"--"}}; /* What's the syntax */
+    umn_Lexer lexer = {
+        .data = sb.items,
+        .data_len = sb.count,
+        .symbols = symbols,
+        .symbol_count = ARRAY_LEN(symbols),
+    };
+
+    /* this magic fuckin loop does stuff etc .. k*/
+    while (umn_lexer_peek(&lexer, &token) == 0)
+    {
+        size_t token_end = token.begin + token.length;
+
+        if (umn_token_issymbol(&lexer, &token, "--"))
+        {
+            umn_lexer_take(&lexer, &token);
+            umn_lexer_peek(&lexer, &token);
+
+            if (token.begin != token_end)
+                break; /* this does not matter any more */
+
+            for (int i = 0; i < Enc_Last; i++)
+                config.output[i] = config.output[i] || umn_token_litcmp(&lexer, &token, ENC_MAP_L[i]) == 0;
+
+            umn_lexer_take(&lexer, &token);
+            continue;
+        }
+        else if (umn_token_issymbol(&lexer, &token, "-"))
+        {
+            umn_lexer_take(&lexer, &token);
+            umn_lexer_peek(&lexer, &token);
+
+            if (token.begin != token_end || token.kind != UMN_KLITERAL)
+                continue; /* let's move on this should error but oh well */
+
+            for (int j = 0; j < token.length; j++)
+            {
+                for (int i = 0; i < Enc_Last; i++)
+                    config.output[i] = config.output[i] || lexer.data[token.begin + j] == ENC_MAP_S[i];
+            }
+
+            umn_lexer_take(&lexer, &token);
+            continue;
+        }
+
+        break;
+    }
+
+    /* NOTE: leaking memory, this should just return the lexer */
+    config.lexer = lexer;
+
+    /* set default output */
+    {
+        unsigned int sum = 0;
+        for (int i = 0; i < Enc_Last; i++)
+            sum += config.output[i];
+
+        if (sum == 0)
+            config.output[Enc_Dec] = true;
+    }
+
+    return config;
+}
+
+void print_bin(uint64_t value)
+{
+    uint64_t n = value;
+    unsigned int j = 0;
+    while (n >>= 1)
+        j++;
+
+    printf("0b");
+    do
+    {
+        putchar(((value & (1UL << j)) > 0) + '0');
+    } while (j-- != 0);
+}
 
 int main(int argc, char **argv)
 {
-    umn_Sb sb = {0};
-    Exprs exprs = {0};
-    Expr *expr;
-    umn_Token token, next_token;
+    /* please do not look into this function */
+    /* NOTE: leaking memory of the string ... */
+    Conf config = init_conf(argc, argv);
 
-    int base_enc_map[] = {
-        [Enc_Dec] = 10,
-        [Enc_Bin] = 2,
-        [Enc_Oct] = 8,
-        [Enc_Hex] = 16,
-    };
-    bool encs[Enc_Hex + 1] = {0};
+    /* construct the lexer ... */
 
-    for (int i = 1; i < argc; i++)
+    /* allocator */
+    umn_expr_pnode_slab_t nodes = {0};
+
+    umn_Token token;
+    umn_Lexer lexer = config.lexer;
+    lexer.symbols = umn_expr_symbols;
+    lexer.symbol_count = ARRAY_LEN(umn_expr_symbols);
+
+    umn_PNode *node;
+
+    UMN_SLICE_T(struct {umn_PNode *node; uint64_t value; })
+    computed_values = {0};
+
+    while ((node = umn_expr_parse(&nodes, &lexer)))
     {
-        umn_sb_append(&sb, argv[i]);
-        umn_sb_appendc(&sb, ' ');
-    }
-
-    umn_Lexer lexer = {.data = sb.data, .data_len = sb.length};
-    /* 1st read the options */
-    lexer.symbols = options_symbols;
-    lexer.symbol_count = ARRAY_LEN(options_symbols);
-    while (umn_lexer_peek(&lexer, &token) == 0 && (token.kind & (~UMN_KERR)) != UMN_KEOF)
-    {
-        /* -dx or -d -x */
-        uint64_t expected_begin = (token.begin + token.length);
-
-        if (umn_token_issymbol(&lexer, &token, "-"))
+        if ((node->token.kind & UMN_KERR) && node->lvalue != NULL) /* this is such a hack */
         {
+            umn_lexer_give(&lexer, &node->token);
+            node = node->lvalue;
+        }
+
+        if ((node->token.kind & ~UMN_KERR) != UMN_KINTEGER)
+            UMN_TODO("support non integer values");
+        else if (node->token.kind & UMN_KERR)
+            UMN_TODO("handle errors");
+
+        /* so i would compute the value here ... */
+        umn_slice_reserve(computed_values, 1);
+        computed_values.items[computed_values.count].node = node;
+        computed_values.items[computed_values.count].value = umn_token_readi(&lexer, &node->token);
+        computed_values.count++;
+
+        /* read separating commas and stuff  */
+        while (umn_lexer_peek(&lexer, &token) == 0 && (umn_token_issymbol(&lexer, &token, ",")))
             umn_lexer_take(&lexer, &token);
-
-            while (umn_lexer_peek(&lexer, &next_token) == 0 && (expected_begin == next_token.begin) && next_token.kind == UMN_KSYMBOL)
-            {
-                expected_begin = next_token.begin + token.length;
-                umn_lexer_take(&lexer, &next_token);
-
-                if (next_token.d.symbol.data == 0)
-                {
-                    /* set some error condition */
-                    break;
-                }
-
-                assert(next_token.d.symbol.data < ARRAY_LEN(encs));
-                encs[next_token.d.symbol.data] = true;
-            }
-        }
-        else if (umn_token_issymbol(&lexer, &token, "--"))
-        {
-            umn_lexer_take(&lexer, &token);
-            if (umn_lexer_peek(&lexer, &next_token) == 0 && expected_begin == next_token.begin && next_token.kind == UMN_KSYMBOL)
-            {
-                if (next_token.d.symbol.data == 0)
-                    continue;
-
-                assert(next_token.d.symbol.data < ARRAY_LEN(encs));
-                encs[next_token.d.symbol.data] = true;
-            }
-            umn_token_print(&lexer, &next_token);
-        }
-        else
-        {
-            break; /* do no damage */
-        }
     }
 
-    /* 2nd parse the expressions and stuff */
-    lexer.symbols = symbols;
-    lexer.symbol_count = ARRAY_LEN(symbols);
-
-    while (umn_lexer_next(&lexer, &token) == 0 && (token.kind & (~UMN_KERR)) != UMN_KEOF)
+    /* iterate over the thing an print the values S*/
+    for (int i = 0; i < computed_values.count; i++)
     {
-        int64_t v;
-        if (token.kind == UMN_KSTRING && token.length == 1)
-        {
-            v = (*(lexer.data + token.begin));
-            if (v >= 0x80)
-                continue; /* IGNORE */
-        }
-        else if (token.kind == UMN_KINTEGER)
-            v = umn_token_readi(&lexer, &token);
-        else
-        {
-            continue; /* IGNORE */
-        }
+        uint64_t value = umn_slice_at(computed_values, i).value;
+        umn_Token *t = &umn_slice_at(computed_values, i).node->token;
 
-        expr = exprs_alloc(&exprs);
-        memcpy(&expr->token, &token, sizeof(token));
-        expr->value = v;
-    }
+        for (int j = 0; j < t->length; j++)
+            putchar(lexer.data[t->begin + j]);
 
-    /* 3rd default to decimal */
-    bool no_encs = !(encs[Enc_Hex] || encs[Enc_Oct] || encs[Enc_Bin]);
-    if (no_encs)
-    {
-        encs[Enc_Dec] = true;
-    }
-    /* 4th output the values */
-    for (int enc = Enc_Unknown; enc <= Enc_Hex; enc++)
-    {
-        if (!encs[enc])
-            continue;
+        printf(" = ");
 
-        printf("%2d:  ", base_enc_map[enc]);
-        for (int i = 0; i < exprs.count; i++)
+        bool touched = false;
+        for (Enc e = 0; e < Enc_Last; e++)
         {
-            expr = exprs.items + i;
-            if (i > 0)
+            if (!config.output[e])
+                continue;
+
+            if (touched)
                 printf(", ");
-
-            static char input[100] = {0};
-            static char s[100] = {0};
-            /* NOTE theese functions are returning some FS */
-            if (enc == Enc_Dec)
-                snprintf(s, sizeof(s) - 1, "%lu", expr->value);
-            else if (enc == Enc_Bin)
-                dec2bin(s, sizeof(s) - 1, expr->value);
-            else if (enc == Enc_Oct)
-                snprintf(s, sizeof(s) - 1, "%#lo", expr->value);
-            else if (enc == Enc_Hex)
-                snprintf(s, sizeof(s) - 1, "0x%lx", expr->value);
-
-            umn_token_strncpy(&lexer, &expr->token, input, sizeof(input));
-
-            if ((token.kind & UMN_KNUMERIC) == 0)
-            {
-                printf("'%s'=%s", input, s);
-            }
             else
+                touched = true;
+
+            switch (e)
             {
-                printf("%s=%s", input, s);
+            case Enc_Bin:
+                print_bin(value);
+                break;
+            case Enc_Oct:
+                printf("%#lo", value);
+                break;
+            case Enc_Hex:
+                printf("%#lx", value);
+                break;
+            case Enc_Dec:
+                printf("%lu", value);
+                break;
+            default:
+                abort();
             }
         }
-        printf("\n");
+        putchar('\n');
     }
 
     return 0;
