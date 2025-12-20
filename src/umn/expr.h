@@ -290,9 +290,10 @@ umn_PNode *umn_expr_parse(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer)
         }
         else if (!expect_value && (token.kind != UMN_KSYMBOL || token.d.symbol.data == 0 /* NOTE: this should probably be a flag */))
         {
-            token.kind |= UMN_KERR;
-            memcpy(&umn_slice_at(stack, -1)->token, &token, sizeof(token));
-            return umn_slice_at(stack, -1);
+            umn_PNode *err_node = umn_pnode_alloc(nodes, &token);
+            err_node->token.kind |= UMN_KERR;
+            err_node->lvalue = umn_slice_at(stack, -1);
+            return err_node;
         }
         else if (!expect_value && umn_slice_at(stack, -1)->token.kind == 0)
         {
