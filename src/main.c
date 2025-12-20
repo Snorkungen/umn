@@ -57,6 +57,9 @@ Conf init_conf(int argc, char **argv)
     Conf config = {0};
 
     umn_sb_t sb = {0};
+    umn_slice_reserve(sb, 128);
+    sb.items[0] = '\0';
+    
     for (int i = 1; i < argc; i++)
     {
         umn_sb_appendc(&sb, ' ');
@@ -147,7 +150,6 @@ int main(int argc, char **argv)
     /* please do not look into this function */
     /* NOTE: leaking memory of the string ... */
     Conf config = init_conf(argc, argv);
-
     /* construct the lexer ... */
 
     /* allocator */
@@ -230,9 +232,10 @@ int main(int argc, char **argv)
         putchar('\n');
     }
 
-    /* free the computed values slice */
-    umn_slab_free(nodes, nodes.items->items);
+    umn_slab_free(nodes, nodes.items ? nodes.items->items : NULL);
+
     free((char *)config.lexer.data);
+    /* free the computed values slice */
     free(computed_values.items);
 
     return 0;
