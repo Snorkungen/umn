@@ -23,8 +23,7 @@ int main(void)
         putchar(10);
     }
 
-    foo();
-    return 0;
+    // foo();
 
     /*
         Parse pseudo-code
@@ -63,6 +62,8 @@ int main(void)
 
     for (int i = 0; i < ARRAY_LEN(tests); i++)
     {
+        /* soft reset the slab allocator */
+        umn_slab_drop(nodes, nodes.items->items);
         thing = tests[i].str;
 
         {
@@ -87,7 +88,11 @@ int main(void)
             printf("\033[0m");
             break;
         }
+
     }
+    
+    /* free all nodes  */
+    umn_slab_free(nodes, nodes.items->items);
 
     return 0;
 }

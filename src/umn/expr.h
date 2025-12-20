@@ -192,20 +192,6 @@ umn_PNode *umn_pnode_alloc(umn_expr_pnode_slab_t *nodes, const umn_Token *token)
     return res;
 }
 
-int umn_pnode_free_last_allocated_node(umn_expr_pnode_slab_t *nodes)
-{
-    if (nodes->count == 0 || umn_slice_at((*nodes), -1).count == 0)
-        return -1;
-
-    umn_slice_pop(
-        umn_slice_at((*nodes), -1));
-
-    if (umn_slice_at((*nodes), -1).count == 0)
-        umn_slice_pop((*nodes));
-
-    return 0;
-}
-
 umn_PNode *umn_expr_parse_value_fncddef(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer, umn_Token *token);
 
 umn_PNode *umn_expr_parse(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer)
@@ -272,7 +258,10 @@ umn_PNode *umn_expr_parse(umn_expr_pnode_slab_t *nodes, umn_Lexer *lexer)
             {
                 assert(tmp->rvalue == NULL && tmp->lvalue);
                 memcpy(tmp, tmp->lvalue, sizeof(*tmp));
-                umn_pnode_free_last_allocated_node(nodes);
+
+                /* drop the last node */
+                umn_slab_drop(*nodes,
+                              umn_slice_at(*nodes, -1).items + umn_slice_at(*nodes, -1).count);
             }
 
             stack.count = base_count - 1;

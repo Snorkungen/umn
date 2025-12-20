@@ -1,17 +1,18 @@
 #ifndef UMN_UTILS_H
 #define UMN_UTILS_H
 
+#include <stdlib.h>
 #include <assert.h>
 #include <stddef.h>
 #include <string.h>
 
 /* Utilities for umn */
 
-#define UMN_TODO(msg)                                        \
-    do                                                       \
-    {                                                        \
+#define UMN_TODO(msg)                                         \
+    do                                                        \
+    {                                                         \
         printf("%s:%d: TODO(%s)\n", __FILE__, __LINE__, msg); \
-        abort();                                             \
+        abort();                                              \
     } while (0)
 
 /* The fundamental data structure is what i'm calling a slice */
@@ -26,9 +27,9 @@
 #define umn_slice_reserve(slice, __amount)                                                     \
     do                                                                                         \
     {                                                                                          \
-        if (((slice).count + (__amount)) >= (slice).capacity)                                    \
+        if (((slice).count + (__amount)) >= (slice).capacity)                                  \
         {                                                                                      \
-            (slice).capacity = ((slice).capacity + (__amount) + 1) * 2;                          \
+            (slice).capacity = ((slice).capacity + (__amount) + 1) * 2;                        \
             (slice).items = realloc((slice).items, (slice).capacity * sizeof(*(slice).items)); \
         }                                                                                      \
     } while (0)
@@ -54,25 +55,37 @@
 
 #define UMN_SLAB_SIZE 128 /* just for the vibes just allocate 128 items because why not */
 
-typedef UMN_SLAB_T(void) umn_Slab_Generic;
-void *umn_slab_alloc_generic(umn_Slab_Generic *slab, size_t item_size);
-#define umn_slab_alloc(slab) umn_slab_alloc_generic((umn_Slab_Generic *)&(slab), sizeof((*(*(slab).items).items)))
+typedef UMN_SLAB_T(void) umn_slab_generic_t;
+void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size);
+#define umn_slab_alloc(slab) umn_slab_alloc_generic((umn_slab_generic_t *)&(slab), sizeof((*(*(slab).items).items)))
 
-inline void *umn_slab_alloc_generic(umn_Slab_Generic *slab, size_t item_size)
+void umn_slab_drop_generic(umn_slab_generic_t *slab, void *allocated, size_t item_size);
+void umn_slab_free_generic(umn_slab_generic_t *slab, void *allocated, size_t item_size);
+#define umn_slab_free(slab, allocated) umn_slab_free_generic((umn_slab_generic_t *)&(slab), allocated, sizeof((*(*(slab).items).items)))
+#define umn_slab_drop(slab, allocated) umn_slab_drop_generic((umn_slab_generic_t *)&(slab), allocated, sizeof((*(*(slab).items).items)))
+
+void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size)
 {
     /* handle base case */
     if (slab->count == 0 || umn_slice_at((*slab), -1).count == umn_slice_at((*slab), -1).capacity)
     {
-        slab->count++;
+        slab->count += 1;
+
+        size_t begin_cap = slab->capacity;
         umn_slice_reserve((*slab), 0);
+        /* initialize the items */
+        memset(slab->items + begin_cap, 0, sizeof(*slab->items) * (slab->capacity - begin_cap));
+
         if (slab->items == NULL)
             return NULL;
 
         /* allocate the block for the slot */
-
-        umn_slice_at((*slab), -1).count = 0;
-        umn_slice_at((*slab), -1).capacity = UMN_SLAB_SIZE;
-        umn_slice_at((*slab), -1).items = malloc(umn_slice_at((*slab), -1).capacity * item_size);
+        if (umn_slice_at(*slab, -1).capacity == 0)
+        {
+            umn_slice_at((*slab), -1).count = 0;
+            umn_slice_at((*slab), -1).capacity = UMN_SLAB_SIZE;
+            umn_slice_at((*slab), -1).items = malloc(umn_slice_at((*slab), -1).capacity * item_size);
+        }
 
         if (umn_slice_at((*slab), -1).items == NULL)
             return NULL;
@@ -82,6 +95,52 @@ inline void *umn_slab_alloc_generic(umn_Slab_Generic *slab, size_t item_size)
 
     void *alllocation = (&((char *)umn_slice_at((*slab), -1).items)[(umn_slice_at((*slab), -1).count - 1) * item_size]);
     memset(alllocation, 0, item_size);
+
     return alllocation;
 }
+
+/* freeing every time is wasteful */
+void umn_slab_drop_generic(umn_slab_generic_t *slab, void *allocated, size_t item_size)
+{
+    int i, j;
+
+    /* determine the slab coords for the thing ... */
+    for (i = -1 + slab->count; i >= 0; --i)
+    {
+        if (allocated >= umn_slice_at(*slab, i).items && ((size_t)allocated - (size_t)umn_slice_at(*slab, i).items) < (size_t)umn_slice_at(*slab, i).count * item_size)
+        {
+            j = ((size_t)allocated - (size_t)umn_slice_at(*slab, i).items) / item_size;
+            break;
+        }
+    }
+
+    if (i < 0)
+        return;
+
+    umn_slice_at(*slab, i).count = j;
+    if (umn_slice_at(*slab, i).count == 0)
+        i--;
+
+    slab->count = i + 1;
+    for (i = slab->count; i < slab->capacity; i++)
+        umn_slice_at(*slab, i).count = 0;
+}
+
+/* free the node and the nodes allocated after */
+void umn_slab_free_generic(umn_slab_generic_t *slab, void *allocated, size_t item_size)
+{
+    umn_slab_drop_generic(slab, allocated, item_size);
+
+    for (unsigned i = slab->count; i < slab->capacity; i++)
+        free(slab->items[i].items);
+
+    memset(slab->items + slab->count, 0, sizeof(*slab->items) * (slab->capacity - slab->count));
+
+    if (slab->count == 0)
+    {
+        free(slab->items);
+        memset(slab, 0, sizeof(*slab));
+    }
+}
+
 #endif

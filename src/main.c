@@ -230,5 +230,10 @@ int main(int argc, char **argv)
         putchar('\n');
     }
 
+    /* free the computed values slice */
+    umn_slab_free(nodes, nodes.items->items);
+    free((char *)config.lexer.data);
+    free(computed_values.items);
+
     return 0;
 }
