@@ -159,69 +159,43 @@ static umn_Symbol umn_notation_symbols[] = {
     {"|", .attrs.data = 10},
 };
 
-uint64_t compute_node(umn_Lexer *lexer, umn_PNode *node)
+uint64_t compute_node(umn_Lexer *lexer, umn_PNode *node, umn_PNode **err_node)
 {
-    uint64_t value = 0, lvalue, rvalue;
+    /* TODO: how do i's indicate an error ...*/
+    /* could just exfiltrate bya assigning onto som kind of err node */
+    /* this is ugly but I would pressume it to work */
+    if (err_node && *err_node)
+        return 0;
 
-#define __macro_define_stack_so_that_this_does_not_create_so_many_newlines(Type, __size__, __name__) \
-    struct                                  \
-    {                                       \
-        size_t count, capacity;             \
-        Type items[(__size__)];             \
-    } __name__ = {.capacity = ARRAY_LEN(__name__.items)}
-
-    __macro_define_stack_so_that_this_does_not_create_so_many_newlines(umn_PNode *, 32, stack);
-    __macro_define_stack_so_that_this_does_not_create_so_many_newlines(unsigned, 32, vstack);
-    __macro_define_stack_so_that_this_does_not_create_so_many_newlines(uint64_t, 64, values);
-#undef __macro_define_stack_so_that_this_does_not_create_so_many_newlines
-
-    umn_slice_push(stack, node);
-    while (stack.count && (node = umn_slice_pop(stack)))
+    assert(node);
+    uint64_t value, lvalue, rvalue;
+    if (node->token.kind == UMN_KINTEGER)
+        return umn_token_readi(lexer, &node->token);
+    else if (node->token.kind & UMN_KBINOP && node->lvalue && node->rvalue)
     {
-        assert((node->token.kind & UMN_KERR) == 0);
+        lvalue = compute_node(lexer, node->lvalue, err_node);
+        rvalue = compute_node(lexer, node->rvalue, err_node);
 
-        if (node->token.kind == UMN_KINTEGER)
-        { /* done happy */
-            value = umn_token_readi(lexer, &node->token);
-            umn_slice_push(values, value);
-        }
-        else if (node->token.kind & UMN_KBINOP && vstack.count > 0 && umn_slice_at(vstack, -1) == stack.count)
-        {
-            umn_slice_pop(vstack);
+        if (NULL)
+            ;
+        else if (umn_token_issymbol(lexer, &node->token, "<<"))
+            value = lvalue << rvalue;
+        else if (umn_token_issymbol(lexer, &node->token, ">>"))
+            value = lvalue >> rvalue;
+        else if (umn_token_issymbol(lexer, &node->token, "&"))
+            value = lvalue & rvalue;
+        else if (umn_token_issymbol(lexer, &node->token, "^"))
+            value = lvalue ^ rvalue;
+        else if (umn_token_issymbol(lexer, &node->token, "|"))
+            value = lvalue | rvalue;
 
-            rvalue = umn_slice_pop(values);
-            lvalue = umn_slice_pop(values);
-
-            if (NULL)
-                ;
-            else if (umn_token_issymbol(lexer, &node->token, "<<"))
-                value = lvalue << rvalue;
-            else if (umn_token_issymbol(lexer, &node->token, ">>"))
-                value = lvalue >> rvalue;
-            else if (umn_token_issymbol(lexer, &node->token, "&"))
-                value = lvalue & rvalue;
-            else if (umn_token_issymbol(lexer, &node->token, "^"))
-                value = lvalue ^ rvalue;
-            else if (umn_token_issymbol(lexer, &node->token, "|"))
-                value = lvalue | rvalue;
-
-            umn_slice_push(values, value);
-        }
-        else if (node->token.kind & UMN_KBINOP && node->lvalue && node->rvalue)
-        {
-            umn_slice_push(vstack, stack.count);
-            umn_slice_push(stack, node);
-            umn_slice_push(stack, node->rvalue);
-            umn_slice_push(stack, node->lvalue);
-        }
-        else
-            UMN_TODO("handle differing values");
+        return value;
     }
 
-    assert(vstack.count == 0);
-    assert(values.count == 1);
+    if (err_node)
+        *err_node = node;
 
-    return values.items[0];
+    UMN_TODO("handle differing values");
 }
 
 int main(int argc, char **argv)
@@ -258,10 +232,17 @@ int main(int argc, char **argv)
             UMN_TODO("handle errors");
 
         /* so i would compute the value here ... */
+        umn_PNode *err_node = NULL;
+
         umn_slice_reserve(computed_values, 1);
         computed_values.items[computed_values.count].node = node;
-        computed_values.items[computed_values.count].value = compute_node(&lexer, node);
+        computed_values.items[computed_values.count].value = compute_node(&lexer, node, &err_node);
         computed_values.count++;
+
+        if (err_node)
+        {
+            UMN_TODO("handle errors");
+        }
 
         /* read separating commas and stuff  */
         while (umn_lexer_peek(&lexer, &token) == 0 && (umn_token_issymbol(&lexer, &token, ",")))
