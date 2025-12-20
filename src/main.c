@@ -152,12 +152,77 @@ static umn_Symbol umn_notation_symbols[] = {
 
     /* this needs a better way of encoding the the symbol and stuff */
     /* currently the expr parse relies on the fact that the attrs have a precedence which is defined as something */
-    {"ls", .attrs.data = 10},
-    {"rs", .attrs.data = 10},
-    {"and", .attrs.data = 10},
-    {"xor", .attrs.data = 10},
-    {"or", .attrs.data = 10},
+    {"<<", .attrs.data = 10},
+    {">>", .attrs.data = 10},
+    {"&", .attrs.data = 10},
+    {"^", .attrs.data = 10},
+    {"|", .attrs.data = 10},
 };
+
+uint64_t compute_node(umn_Lexer *lexer, umn_PNode *node)
+{
+    uint64_t value = 0, lvalue, rvalue;
+
+#define __macro_define_stack_so_that_this_does_not_create_so_many_newlines(Type, __size__, __name__) \
+    struct                                  \
+    {                                       \
+        size_t count, capacity;             \
+        Type items[(__size__)];             \
+    } __name__ = {.capacity = ARRAY_LEN(__name__.items)}
+
+    __macro_define_stack_so_that_this_does_not_create_so_many_newlines(umn_PNode *, 32, stack);
+    __macro_define_stack_so_that_this_does_not_create_so_many_newlines(unsigned, 32, vstack);
+    __macro_define_stack_so_that_this_does_not_create_so_many_newlines(uint64_t, 64, values);
+#undef __macro_define_stack_so_that_this_does_not_create_so_many_newlines
+
+    umn_slice_push(stack, node);
+    while (stack.count && (node = umn_slice_pop(stack)))
+    {
+        assert((node->token.kind & UMN_KERR) == 0);
+
+        if (node->token.kind == UMN_KINTEGER)
+        { /* done happy */
+            value = umn_token_readi(lexer, &node->token);
+            umn_slice_push(values, value);
+        }
+        else if (node->token.kind & UMN_KBINOP && vstack.count > 0 && umn_slice_at(vstack, -1) == stack.count)
+        {
+            umn_slice_pop(vstack);
+
+            rvalue = umn_slice_pop(values);
+            lvalue = umn_slice_pop(values);
+
+            if (NULL)
+                ;
+            else if (umn_token_issymbol(lexer, &node->token, "<<"))
+                value = lvalue << rvalue;
+            else if (umn_token_issymbol(lexer, &node->token, ">>"))
+                value = lvalue >> rvalue;
+            else if (umn_token_issymbol(lexer, &node->token, "&"))
+                value = lvalue & rvalue;
+            else if (umn_token_issymbol(lexer, &node->token, "^"))
+                value = lvalue ^ rvalue;
+            else if (umn_token_issymbol(lexer, &node->token, "|"))
+                value = lvalue | rvalue;
+
+            umn_slice_push(values, value);
+        }
+        else if (node->token.kind & UMN_KBINOP && node->lvalue && node->rvalue)
+        {
+            umn_slice_push(vstack, stack.count);
+            umn_slice_push(stack, node);
+            umn_slice_push(stack, node->rvalue);
+            umn_slice_push(stack, node->lvalue);
+        }
+        else
+            UMN_TODO("handle differing values");
+    }
+
+    assert(vstack.count == 0);
+    assert(values.count == 1);
+
+    return values.items[0];
+}
 
 int main(int argc, char **argv)
 {
@@ -189,35 +254,13 @@ int main(int argc, char **argv)
             node = tmp;
         }
 
-        uint64_t value = 0;
-        if (node->token.kind & UMN_KBINOP && node->rvalue->token.kind == UMN_KINTEGER && node->rvalue->token.kind == UMN_KINTEGER)
-        {
-            if (umn_token_issymbol(&lexer, &node->token, "ls"))
-                value = umn_token_readi(&lexer, &node->lvalue->token) << umn_token_readi(&lexer, &node->rvalue->token);
-            else if (umn_token_issymbol(&lexer, &node->token, "rs"))
-                value = umn_token_readi(&lexer, &node->lvalue->token) >> umn_token_readi(&lexer, &node->rvalue->token);
-            else if (umn_token_issymbol(&lexer, &node->token, "and"))
-                value = umn_token_readi(&lexer, &node->lvalue->token) & umn_token_readi(&lexer, &node->rvalue->token);
-            else if (umn_token_issymbol(&lexer, &node->token, "xor"))
-                value = umn_token_readi(&lexer, &node->lvalue->token) ^ umn_token_readi(&lexer, &node->rvalue->token);
-            else if (umn_token_issymbol(&lexer, &node->token, "or"))
-                value = umn_token_readi(&lexer, &node->lvalue->token) | umn_token_readi(&lexer, &node->rvalue->token);
-            else
-                UMN_TODO("how to compute binary computations");
-        }
-        else if (node->token.kind == UMN_KINTEGER)
-        {
-            value = umn_token_readi(&lexer, &node->token);
-        }
-        else if ((node->token.kind & ~UMN_KERR) != UMN_KINTEGER)
-            UMN_TODO("support non integer values");
-        else if (node->token.kind & UMN_KERR)
+        if (node->token.kind & UMN_KERR)
             UMN_TODO("handle errors");
 
         /* so i would compute the value here ... */
         umn_slice_reserve(computed_values, 1);
         computed_values.items[computed_values.count].node = node;
-        computed_values.items[computed_values.count].value = value;
+        computed_values.items[computed_values.count].value = compute_node(&lexer, node);
         computed_values.count++;
 
         /* read separating commas and stuff  */
@@ -267,7 +310,6 @@ int main(int argc, char **argv)
     }
 
     umn_slab_free(nodes, nodes.items ? nodes.items->items : NULL);
-
     free((char *)config.lexer.data);
     /* free the computed values slice */
     free(computed_values.items);

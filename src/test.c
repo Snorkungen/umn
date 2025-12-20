@@ -64,16 +64,86 @@ void run_expr_tests(void)
     umn_slab_free(nodes, nodes.items->items);
 }
 
+int compute_node(umn_Lexer *lexer, umn_PNode *node)
+{
+    uint64_t value = 0, lvalue, rvalue;
+
+    struct
+    {
+        size_t count, capacity;
+        umn_PNode *items[32];
+    } stack = {.capacity = ARRAY_LEN(stack.items)};
+
+    struct
+    {
+        size_t count, capacity;
+        uint64_t items[64];
+    } values = {.capacity = ARRAY_LEN(values.items)};
+    struct
+    {
+        size_t count, capacity;
+        unsigned items[64];
+    } vstack = {.capacity = ARRAY_LEN(vstack.items)};
+
+    umn_slice_push(stack, node);
+
+    while (stack.count && (node = umn_slice_pop(stack)))
+    {
+
+        assert((node->token.kind & UMN_KERR) == 0);
+
+        umn_pnode_print(lexer, node);
+
+        if (node->token.kind == UMN_KINTEGER)
+        { /* done happy */
+            value = umn_token_readi(lexer, &node->token);
+            umn_slice_push(values, value);
+        }
+        else if (node->token.kind & UMN_KBINOP && vstack.count > 0 && umn_slice_at(vstack, -1) == stack.count)
+        {
+            umn_slice_pop(vstack);
+
+            rvalue = umn_slice_pop(values);
+            lvalue = umn_slice_pop(values);
+
+            if (NULL)
+                ;
+            else if (umn_token_issymbol(lexer, &node->token, "+"))
+                value = lvalue + rvalue;
+            else if (umn_token_issymbol(lexer, &node->token, "*"))
+                value = lvalue * rvalue;
+
+            umn_slice_push(values, value);
+        }
+        else if (node->token.kind & UMN_KBINOP && node->lvalue && node->rvalue)
+        {
+            umn_slice_push(vstack, stack.count);
+            umn_slice_push(stack, node);
+            umn_slice_push(stack, node->rvalue);
+            umn_slice_push(stack, node->lvalue);
+        }
+        else
+            UMN_TODO("handle differing values");
+    }
+
+    printf("value = %lu\n", umn_slice_at(values, -1));
+}
+
 int main(void)
 {
     umn_PNode *node;
     umn_Token token;
-    umn_Lexer lexer = __MACRO__umn_lexer_init("", umn_expr_symbols);
+    umn_Lexer lexer = __MACRO__umn_lexer_init("1 + 3 * 2", umn_expr_symbols);
+
+    node = umn_expr_parse(&nodes, &lexer);
+
+    compute_node(&lexer, node);
 
     /* run different tests and stuff */
-    run_expr_tests();
+    // run_expr_tests();
 
-    umn_slab_free(nodes, nodes.items ? nodes.items->items : NULL);;
+    umn_slab_free(nodes, nodes.items ? nodes.items->items : NULL);
+    ;
 
     return 0;
 }
