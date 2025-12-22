@@ -1,10 +1,14 @@
 #ifndef UMN_UTILS_H
 #define UMN_UTILS_H
 
+#include <stdint.h>
+#include <stddef.h>
+#include <stdbool.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <stddef.h>
 #include <string.h>
+
+#define ARRAY_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
 /* Utilities for umn */
 

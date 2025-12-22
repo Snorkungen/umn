@@ -1,7 +1,7 @@
 #ifndef UMN_EXPR_H
 #define UMN_EXPR_H
 
-#define ARRAY_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
+
 
 #include "./utils.h"
 #include "./lexer.h"
