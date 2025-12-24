@@ -2,9 +2,10 @@ mkdir -p .tmp
 NAME=$1
 shift 1
 
+CFLAGS=(--std=c99 -pedantic -Werror -O2)
 
-cc --std=c99 -g -S -O0 -pedantic -Werror -o "./.tmp/$NAME.s" ./src/$NAME.c
-cc --std=c99 -O0 -pedantic -Werror -o "./.tmp/$NAME" ./src/$NAME.c
+cc $CFLAGS -ggdb -S -o "./.tmp/$NAME.s" ./src/$NAME.c
+cc $CFLAGS -ggdb -o "./.tmp/$NAME" ./src/$NAME.c
 
 if [ -z ${DIFF+x} ]; then
     ./.tmp/"$NAME" "$@"
@@ -17,4 +18,6 @@ else
     diff "./.tmp/$NAME.new" "./.tmp/$NAME.old" 
 fi
 
-# rm "./.tmp/$NAME"
+if [ $? -eq 0 ]; then
+    rm "./.tmp/$NAME"
+fi

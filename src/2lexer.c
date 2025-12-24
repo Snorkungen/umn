@@ -43,12 +43,15 @@ static inline umn_Lexer init_lexer(const char *data)
 #endif
 }
 
-#define ITER_COUNT (4 * 2 * 1e4)
+#define ITER_COUNT (4 * 10E3)
 
 int main(void)
 {
-    umn_perfm_t *outer = umn_perfm_create(), *inner = umn_perfm_create();
-    lexer_pt = umn_perfm_create();
+    umn_perfm_t *inner;
+
+    inner = umn_perfm_create_new(NULL, "lexer");
+    perfm_lexer_literal = umn_perfm_create_new(inner, "literal");
+    perfm_lexer_keyword = umn_perfm_create_new(inner, "keyword");
 
     umn_Token token;
     // umn_Lexer lexer = init_lexer("1 0.0 0a b 'hello' 0x254 0b11153 0654");
@@ -59,24 +62,22 @@ int main(void)
     {
         lexer.position = 0;
 
-        umn_perfm_open_stop(outer)
+        do
         {
-            do
+            umn_perfm_open_stop(inner)
             {
-                umn_perfm_open_stop(inner)
-                {
-                    umn_lexer_next(&lexer, &token);
-                }
-            } while ((token.kind & UMN_KERR) == 0 && token.kind != UMN_KEOF);
-        }
+                umn_lexer_next(&lexer, &token);
+            }
+        } while ((token.kind & UMN_KERR) == 0 && token.kind != UMN_KEOF);
 
-        if ((outer->n % (size_t)(ITER_COUNT / 4)) == 0)
+        if ((inner->avg.n % (size_t)(ITER_COUNT / 4)) == 0)
         {
-            printf("outer = %llu, inner = %llu, lexer_inner = %llu\n", outer->mavg, inner->mavg,  lexer_pt->mavg);
+            // umn_perfm_report(lexer_pt);
+            umn_perfm_report(inner);
 
-            umn_perfm_reset(outer);
             umn_perfm_reset(inner);
-            umn_perfm_reset(lexer_pt);
+            umn_perfm_reset(perfm_lexer_literal);
+            umn_perfm_reset(perfm_lexer_keyword);
         }
     }
 

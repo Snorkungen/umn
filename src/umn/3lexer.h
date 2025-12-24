@@ -219,7 +219,7 @@ static inline bool umn_lexer_read_fraction(umn_Lexer *lexer, umn_Token *token, w
   return isdigit(curr);
 }
 
-static umn_perfm_t *lexer_pt = NULL;
+static umn_perfm_t *perfm_lexer_literal = NULL, *perfm_lexer_keyword = NULL;
 
 int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
 {
@@ -258,7 +258,7 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
     token->kind = UMN_KSTRING;
   }
 
-  umn_perfm_open(lexer_pt);
+  umn_perfm_open(perfm_lexer_literal);
 
 #if 0
   /* read literals */
@@ -277,6 +277,7 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
     curr = umn_lexer_decode_utf8(lexer);
   }
 #else
+  /* looka at what kind of assembly a switch will generate */
   while (token->kind == UMN_KLITERAL && !(/* break on special characters */
                                           curr == '\0' ||
                                           curr == umn_Enc_String_1 ||
@@ -290,7 +291,7 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
 
 #endif
 
-  umn_perfm_stop(lexer_pt);
+  umn_perfm_stop(perfm_lexer_literal);
 
   /* read string, returns when done */
   if (token->kind == UMN_KSTRING)
@@ -447,6 +448,8 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
   assert(ARRAY_LEN(cached_lens) > lexer->symbols.count);
   int best = -1;
 
+  umn_perfm_open(perfm_lexer_keyword);
+
   for (unsigned i = 0; i < lexer->symbols.count; i++)
     cached_lens[i] = strlen(lexer->symbols.items[i].s);
 
@@ -477,6 +480,8 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
     token->data = symbol->data;
     token->flags = symbol->flags;
 
+    umn_perfm_stop(perfm_lexer_keyword);
+
     return 0;
   }
 
@@ -494,11 +499,13 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
         /* we's found something quit */
         token->length = i;
         lexer->position = token->begin + token->length;
+
+        umn_perfm_stop(perfm_lexer_keyword);
         return 0;
       }
     }
   }
-
+  umn_perfm_stop(perfm_lexer_keyword);
   return 0;
 }
 

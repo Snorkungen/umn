@@ -3,18 +3,26 @@
 
 #include "utils.h"
 #include <stdint.h>
+#include <stdio.h>
 
 #ifdef __x86_64__
 #include <x86intrin.h>
 #define umn_perfm_tsc() (_rdtsc())
 #endif
 
-typedef struct
+typedef struct umn_perfm_t
 {
-    /* I think this can be unsigned */
-    unsigned long long mavg; /* moving average */
-    unsigned long long n;    /* count */
-    unsigned long long time; /* the time of opening */
+    struct
+    {
+        const char *name;
+        struct umn_perfm_t *parent, *child, *sibling;
+        char name_buffer[8];
+    } data;
+
+    struct
+    {
+        unsigned long long v, n, start;
+    } avg;
 } umn_perfm_t;
 
 static struct
@@ -29,7 +37,7 @@ static struct
     /* here i can shove other things in the future */
 } umn_perfm_ctx = {0};
 
-#define umn_perfm_reset(t) ((*t) = (umn_perfm_t){.time = (size_t)-1})
+#define umn_perfm_reset(t) memset(&t->avg, 0, sizeof(t->avg))
 
 umn_perfm_t *umn_perfm_create(void)
 {
@@ -37,12 +45,61 @@ umn_perfm_t *umn_perfm_create(void)
     umn_perfm_reset(t);
     return t;
 }
+umn_perfm_t *umn_perfm_create_new(umn_perfm_t *parent, const char *name)
+{
+    umn_perfm_t *t = umn_slab_alloc(umn_perfm_ctx);
+    memset(t, 0, sizeof(*t));
+
+    if (name)
+        t->data.name = name;
+    else /* auto generate a \consistent\ name */
+    {
+        t->data.name = t->data.name_buffer;
+        t->data.name_buffer[0] = '@';
+        t->data.name_buffer[1] = '1';
+    }
+
+    if (parent)
+    {
+        t->data.parent = parent;
+        umn_perfm_t *sibling = t->data.parent->data.child;
+
+        while (sibling && sibling->data.sibling)
+            sibling = sibling->data.sibling;
+
+        if (parent->data.child == NULL)
+            parent->data.child = t;
+        else
+            sibling->data.sibling = t;
+    }
+
+    return t;
+}
+
+void umn_perfm_setup(umn_perfm_t *t, const char *name, umn_perfm_t *parent)
+{
+    t->data.name = name;
+    t->data.name = name;
+    t->data.parent = parent;
+    if (parent && parent->data.child)
+    {
+        t->data.sibling = parent->data.child;
+        parent->data.child = t;
+        /* let's just do it in constant time because it's easier */
+    }
+    else if (parent)
+        parent->data.child = t;
+
+    if (name == NULL)
+    {
+        /* */
+    }
+}
 
 static unsigned umn_perfm_open(umn_perfm_t *t);
 static inline unsigned umn_perfm_open(umn_perfm_t *t)
 {
-    t->time = umn_perfm_tsc();
-    // printf("opened = %llu\n", t->time);
+    t->avg.start = umn_perfm_tsc();
     return 1;
 }
 
@@ -50,15 +107,17 @@ static unsigned umn_perfm_stop(umn_perfm_t *t);
 static inline unsigned umn_perfm_stop(umn_perfm_t *t)
 {
     /* avg += ((t2 - t1) - avg) / (n + 1)*/
-    t->mavg = (long long)t->mavg + ((long long)(umn_perfm_tsc() - t->time) - (long long)(t->mavg)) / (long long)(++t->n);
+    t->avg.v = (long long)t->avg.v +
+               ((long long)(umn_perfm_tsc() - t->avg.start) - (long long)t->avg.v) /
+                   (long long)(++t->avg.n);
 
-    t->time = (size_t)-1; /* just incase so that this will hopefully create an obvious errror */
+    t->avg.start = (size_t)-1; /* just incase so that this will hopefully create an obvious errror */
     return 0;
 }
 
-#define umn_perfm_open_stop(t) for (          \
+#define umn_perfm_open_stop(t) for (              \
     int __umn_perfm_toggle__ = umn_perfm_open(t); \
-    __umn_perfm_toggle__;                     \
+    __umn_perfm_toggle__;                         \
     __umn_perfm_toggle__ = umn_perfm_stop(t))
 
 /*
@@ -69,5 +128,25 @@ umn_perfm_stop(id)
 
 umn_perfm_get(id).avg
 */
+
+void umn_perfm_report(umn_perfm_t *t)
+{
+    char buffer[128] = {0}, *dest = buffer;
+    const char *name = t->data.name;
+
+    unsigned long long avg = t->avg.v;
+
+    printf("%s = %llu", name, avg);
+
+    // iterate over children
+    for (umn_perfm_t *child = t->data.child; child; child = child->data.sibling)
+    {
+        printf(", .%s = %llu %.0Lf%%",
+               child->data.name,
+               child->avg.v, (long double)child->avg.v / t->avg.v * 100);
+    }
+
+    putchar('\n');
+}
 
 #endif
