@@ -10,6 +10,8 @@
 /* umn_token_flag(token)*/
 
 #include "./utils.h"
+#include "./perfm.h"
+
 #include <stdio.h>
 #include <ctype.h>
 
@@ -127,6 +129,24 @@ inline wchar_t umn_lexer_decode_utf8(umn_Lexer *lexer)
   return lexer->data[lexer->position];
 }
 
+static bool umn_lexer_read_literal(umn_Lexer *lexer, umn_Token *token, wchar_t curr);
+static bool umn_lexer_read_literal(umn_Lexer *lexer, umn_Token *token, wchar_t curr)
+{
+  // if (isspace(curr))
+  //   return false;
+
+  switch (curr)
+  {
+  case '\0':
+  case '\\':
+  case umn_Enc_String_1:
+  case umn_Enc_String_2:
+    return false;
+  default:
+    return true;
+  }
+}
+
 static bool umn_lexer_read_integer(umn_Lexer *lexer, umn_Token *token, wchar_t curr);
 static inline bool umn_lexer_read_integer(umn_Lexer *lexer, umn_Token *token, wchar_t curr)
 {
@@ -199,11 +219,15 @@ static inline bool umn_lexer_read_fraction(umn_Lexer *lexer, umn_Token *token, w
   return isdigit(curr);
 }
 
+static umn_perfm_t *lexer_pt = NULL;
+
 int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
 {
+
   wchar_t curr;
   memset(token, 0, sizeof(*token));
-  lexer->separation_pos = -1;
+
+  lexer->separation_pos = (size_t)-1;
 
   /* before we begin skip whitespace */
   while (lexer->data[lexer->position] != '\0' && ((curr = lexer->data[lexer->position]) <= ' ' || isspace(curr)))
@@ -229,16 +253,20 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
   token->line_offset = lexer->position - lexer->line_begin;
   token->kind = isdigit(curr) ? UMN_KINTEGER : UMN_KLITERAL;
 
+  if (curr == umn_Enc_String_1 || curr == umn_Enc_String_2)
+  {
+    token->kind = UMN_KSTRING;
+  }
+
+  umn_perfm_open(lexer_pt);
+
+#if 0
   /* read literals */
-  while (token->kind == UMN_KLITERAL && curr != '\0' && (curr > ' ' && !isspace(curr)))
+  while (token->kind == UMN_KLITERAL && curr != '\0' && (!isspace(curr)))
   {
     /* break on special characters */
     if (curr == umn_Enc_String_1 || curr == umn_Enc_String_2)
     {
-      if (lexer->position == token->begin)
-      {
-        token->kind = UMN_KSTRING;
-      }
       break;
     }
 
@@ -248,6 +276,21 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
     lexer->position = lexer->next_position;
     curr = umn_lexer_decode_utf8(lexer);
   }
+#else
+  while (token->kind == UMN_KLITERAL && !(/* break on special characters */
+                                          curr == '\0' ||
+                                          curr == umn_Enc_String_1 ||
+                                          curr == umn_Enc_String_2 ||
+                                          curr == '\\'))
+  {
+
+    lexer->position = lexer->next_position;
+    curr = umn_lexer_decode_utf8(lexer);
+  }
+
+#endif
+
+  umn_perfm_stop(lexer_pt);
 
   /* read string, returns when done */
   if (token->kind == UMN_KSTRING)
@@ -276,11 +319,76 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
     }
   }
 
+#ifndef MANUAL_INLINE
   /* tight loops for integer and fraction stuff, NOTE: read integer might fail into a fraction */
+
   while (token->kind == UMN_KINTEGER && umn_lexer_read_integer(lexer, token, curr))
   {
     curr = lexer->data[++lexer->position];
   }
+#else
+
+  while (token->kind == UMN_KINTEGER && curr != '\0')
+  {
+    if (token->encoding == umn_Enc_Integer_Dec && curr == '.')
+    {
+      token->kind = UMN_KFRACTION;
+      lexer->separation_pos = lexer->position;
+    }
+    else if (token->begin == (lexer->position - 1) && lexer->data[token->begin] == '0')
+    /* NOTE: I do not know how the utf8 parsing will effect this */
+    {
+      /* attempt to read the thing ... */
+      if (curr - '0' <= 7 && isdigit(curr))
+        token->encoding = umn_Enc_Integer_Octal;
+      else if (tolower(curr) == umn_Enc_Integer_Binary)
+        token->encoding = umn_Enc_Integer_Binary;
+      else if (tolower(curr) == umn_Enc_Integer_Hexadec)
+        token->encoding = umn_Enc_Integer_Hexadec;
+      else
+      {
+        break;
+      }
+
+      lexer->separation_pos = lexer->position;
+    }
+    else if (lexer->data[token->begin] != '0' && token->encoding == umn_Enc_Integer_Dec && (curr) == umn_Enc_Integer_E)
+    {
+      token->encoding = umn_Enc_Integer_E;
+      lexer->separation_pos = lexer->position;
+    }
+    else if (token->encoding == umn_Enc_Integer_E && lexer->position == (lexer->separation_pos + 1) && (curr == '-' || curr == '+'))
+    {
+      lexer->separation_pos = lexer->position;
+    }
+    else
+    {
+      bool b;
+
+      switch (token->encoding)
+      {
+
+      case umn_Enc_Integer_Binary:
+        b = ((curr - '0') <= 1);
+        break;
+      case umn_Enc_Integer_Hexadec:
+        b = isxdigit(curr);
+        break;
+      case umn_Enc_Integer_Octal:
+        b = (curr - '0') <= 7 && isdigit(curr); /* redundant but oh well */
+        break;
+      case umn_Enc_Integer_Dec:
+      default: /* do nothing */
+        b = isdigit(curr);
+        break;
+      }
+
+      if (!b)
+        break;
+    }
+    curr = lexer->data[++lexer->position];
+  }
+#endif
 
   while (token->kind == UMN_KFRACTION && umn_lexer_read_fraction(lexer, token, curr))
   {
@@ -290,6 +398,7 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
   /* NOTE: how does this account for utf-8, but the above logic only cares obout ascii*/
   if (lexer->separation_pos == (lexer->position - 1))
   {
+    printf("pos = %zu, separation pos = %zu\n", lexer->position, lexer->separation_pos);
     token->kind |= UMN_KERR_SEP;
     lexer->position++;
   }

@@ -3,7 +3,8 @@ NAME=$1
 shift 1
 
 
-cc --std=c99 -pedantic -Werror -o "./.tmp/$NAME" ./src/$NAME.c
+cc --std=c99 -g -S -O0 -pedantic -Werror -o "./.tmp/$NAME.s" ./src/$NAME.c
+cc --std=c99 -O0 -pedantic -Werror -o "./.tmp/$NAME" ./src/$NAME.c
 
 if [ -z ${DIFF+x} ]; then
     ./.tmp/"$NAME" "$@"
@@ -16,4 +17,4 @@ else
     diff "./.tmp/$NAME.new" "./.tmp/$NAME.old" 
 fi
 
-rm "./.tmp/$NAME"
+# rm "./.tmp/$NAME"
