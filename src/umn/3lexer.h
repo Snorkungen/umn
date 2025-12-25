@@ -219,7 +219,8 @@ static inline bool umn_lexer_read_fraction(umn_Lexer *lexer, umn_Token *token, w
   return isdigit(curr);
 }
 
-static umn_perfm_t *perfm_lexer_literal = NULL, *perfm_lexer_keyword = NULL;
+static umn_perfm_t *perfm_lexer_literal = NULL,
+                   *perfm_lexer_keyword = NULL;
 
 int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
 {
@@ -258,40 +259,27 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
     token->kind = UMN_KSTRING;
   }
 
-  umn_perfm_open(perfm_lexer_literal);
-
-#if 0
-  /* read literals */
-  while (token->kind == UMN_KLITERAL && curr != '\0' && (!isspace(curr)))
+  umn_perfm_open_for(perfm_lexer_literal)
   {
-    /* break on special characters */
-    if (curr == umn_Enc_String_1 || curr == umn_Enc_String_2)
+    bool b = false;
+    while (token->kind == UMN_KLITERAL)
     {
-      break;
+      switch (curr)
+      {
+      case '\0':
+      case '\\':
+      case umn_Enc_String_1:
+      case umn_Enc_String_2:
+        b = true;
+      }
+
+      if (b || isspace(curr))
+        break;
+
+      lexer->position = lexer->next_position;
+      curr = umn_lexer_decode_utf8(lexer);
     }
-
-    if (curr == '\\')
-      break;
-
-    lexer->position = lexer->next_position;
-    curr = umn_lexer_decode_utf8(lexer);
   }
-#else
-  /* looka at what kind of assembly a switch will generate */
-  while (token->kind == UMN_KLITERAL && !(/* break on special characters */
-                                          curr == '\0' ||
-                                          curr == umn_Enc_String_1 ||
-                                          curr == umn_Enc_String_2 ||
-                                          curr == '\\'))
-  {
-
-    lexer->position = lexer->next_position;
-    curr = umn_lexer_decode_utf8(lexer);
-  }
-
-#endif
-
-  umn_perfm_stop(perfm_lexer_literal);
 
   /* read string, returns when done */
   if (token->kind == UMN_KSTRING)
@@ -444,50 +432,53 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
 {
   /* just statically allocated on the stack a thing */
   const umn_Symbol *symbol;
-  static uint32_t cached_lens[UMN_SYMBOLS_MAX_COUNT];
-  assert(ARRAY_LEN(cached_lens) > lexer->symbols.count);
-  int best = -1;
+  const char *symbol_s;
+  int best = -1, best_count = 0;
 
   umn_perfm_open(perfm_lexer_keyword);
 
   for (unsigned i = 0; i < lexer->symbols.count; i++)
-    cached_lens[i] = strlen(lexer->symbols.items[i].s);
-
-  for (unsigned i = 0; i < lexer->symbols.count; i++)
   {
-    symbol = lexer->symbols.items + i;
+    symbol_s = lexer->symbols.items[i].s;
 
-    if (symbol->s == NULL || cached_lens[i] > token->length)
+    if (symbol_s == NULL)
       continue;
 
     unsigned count = 0;
-    while (count < cached_lens[i] && lexer->data[token->begin + count] == symbol->s[count])
+    while (lexer->data[token->begin + count] == symbol_s[count] && symbol_s[count] != '\0')
       count++;
 
-    if (count == cached_lens[i] && (best < 0 || count > cached_lens[best]))
+    if (symbol_s[count] == '\0' && count > best_count)
+    {
       best = i;
+      best_count = count;
+    }
   }
 
   if (best >= 0)
   {
-
     token->kind = UMN_KSYMBOL;
-    token->length = cached_lens[best];
+    token->length = best_count;
     lexer->position = token->begin + token->length;
 
     /* we still need a better way of doing this  */
-    symbol = lexer->symbols.items + best;
-    token->data = symbol->data;
-    token->flags = symbol->flags;
+    token->data = lexer->symbols.items[best].data;
+    token->flags = lexer->symbols.items[best].flags;
 
     umn_perfm_stop(perfm_lexer_keyword);
 
     return 0;
   }
 
-  /* else now we must check if there is a strong symbol that could cause trouble */
+  static uint32_t cached_lens[UMN_SYMBOLS_MAX_COUNT];
+  assert(ARRAY_LEN(cached_lens) > lexer->symbols.count);
+
+  for (unsigned i = 0; i < lexer->symbols.count; i++)
+    cached_lens[i] = strlen(lexer->symbols.items[i].s);
+
   for (unsigned i = 1; i < token->length; i++)
   {
+
     for (unsigned j = 0; j < lexer->symbols.count; j++)
     {
       symbol = lexer->symbols.items + j;
@@ -505,6 +496,7 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
       }
     }
   }
+
   umn_perfm_stop(perfm_lexer_keyword);
   return 0;
 }

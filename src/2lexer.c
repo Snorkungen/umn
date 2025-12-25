@@ -64,20 +64,16 @@ int main(void)
 
         do
         {
-            umn_perfm_open_stop(inner)
+            umn_perfm_open_for(inner)
             {
                 umn_lexer_next(&lexer, &token);
             }
         } while ((token.kind & UMN_KERR) == 0 && token.kind != UMN_KEOF);
 
-        if ((inner->avg.n % (size_t)(ITER_COUNT / 4)) == 0)
+        if ((i % (size_t)(ITER_COUNT / 4)) == 0)
         {
             // umn_perfm_report(lexer_pt);
             umn_perfm_report(inner);
-
-            umn_perfm_reset(inner);
-            umn_perfm_reset(perfm_lexer_literal);
-            umn_perfm_reset(perfm_lexer_keyword);
         }
     }
 

@@ -115,19 +115,10 @@ static inline unsigned umn_perfm_stop(umn_perfm_t *t)
     return 0;
 }
 
-#define umn_perfm_open_stop(t) for (              \
+#define umn_perfm_open_for(t) for (               \
     int __umn_perfm_toggle__ = umn_perfm_open(t); \
     __umn_perfm_toggle__;                         \
     __umn_perfm_toggle__ = umn_perfm_stop(t))
-
-/*
-id = umn_perfm_create()
-
-umn_perfm_open(id)
-umn_perfm_stop(id)
-
-umn_perfm_get(id).avg
-*/
 
 void umn_perfm_report(umn_perfm_t *t)
 {
@@ -139,14 +130,39 @@ void umn_perfm_report(umn_perfm_t *t)
     printf("%s = %llu", name, avg);
 
     // iterate over children
+
+    /* account for the  overhead of the perfm thing */
+
     for (umn_perfm_t *child = t->data.child; child; child = child->data.sibling)
     {
         printf(", .%s = %llu %.0Lf%%",
                child->data.name,
                child->avg.v, (long double)child->avg.v / t->avg.v * 100);
+
+        umn_perfm_reset(child);
     }
+
+    umn_perfm_reset(t);
 
     putchar('\n');
 }
+
+/*
+id = umn_perfm_create()
+
+umn_perfm_open(id)
+umn_perfm_stop(id)
+
+umn_perfm_get(id).avg
+
+V2 more user friendly
+
+umn_perfm_create(NULL, "name")
+
+umn_perfm_open_for("name")
+    ... statement
+
+
+*/
 
 #endif
