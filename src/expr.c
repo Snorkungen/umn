@@ -1,6 +1,6 @@
 #define UMN_LEXER_IMPL
 
-#include "umn/2expr.h"
+#include "umn/expr.h"
 
 uint64_t compute(const umn_Lexer *lexer, umn_PToken *root)
 {
@@ -39,7 +39,20 @@ int main(void)
         .symbols = umn_expr_symbols,
     };
 
-    // umn_PToken *ptoken;
+    umn_PToken *ptoken;
+
+    lexer.position = 0;
+    lexer.data = "32";
+    ptoken = umn_expr_parse(&ptokens, &lexer);
+    umn_ptoken_tree_print(&lexer, ptoken);
+
+    if (ptoken->token.kind == UMN_KERR)
+    {
+        umn_ptoken_tree_print(&lexer, ptoken->lvalue);
+        umn_ptoken_tree_print(&lexer, ptoken->rvalue);
+
+    }
+
     // ptoken = umn_expr_parse(&ptokens, &lexer);
     // umn_ptoken_tree_print(&lexer, ptoken);
 

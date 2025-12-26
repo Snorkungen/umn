@@ -1,8 +1,6 @@
 /* Snorkungen 2025 umn for the next year */
 
 #define UMN_LEXER_IMPL 1
-#include "umn/lexer.h"
-#include "umn/utils.h"
 #include "umn/expr.h"
 
 typedef enum
@@ -34,24 +32,6 @@ typedef struct
     bool output[Enc_Last];
 } Conf;
 
-typedef UMN_SLICE_T(char) umn_sb_t;
-int umn_sb_appends(umn_sb_t *sb, const char *s)
-{
-    size_t len = strlen(s);
-    umn_slice_reserve((*sb), (len + 1));
-    memcpy(sb->items + sb->count, s, len);
-    sb->count += len;
-    sb->items[sb->count] = '\0';
-    return len;
-}
-int umn_sb_appendc(umn_sb_t *sb, const char v)
-{
-    umn_slice_reserve((*sb), (2));
-    sb->items[sb->count] = v;
-    sb->items[++sb->count] = '\0';
-    return 1;
-}
-
 Conf init_conf(int argc, char **argv)
 {
     Conf config = {0};
@@ -70,9 +50,10 @@ Conf init_conf(int argc, char **argv)
     static umn_Symbol symbols[] = {{"-"}, {"--"}}; /* What's the syntax */
     umn_Lexer lexer = {
         .data = sb.items,
-        .data_len = sb.count,
-        .symbols = symbols,
-        .symbol_count = ARRAY_LEN(symbols),
+        .symbols = {
+            .count = ARRAY_LEN(symbols),
+            .items = symbols,
+        },
     };
 
     /* this magic fuckin loop does stuff etc .. k*/
@@ -131,6 +112,20 @@ Conf init_conf(int argc, char **argv)
     return config;
 }
 
+static umn_Symbol umn_notation_symbols[] = {
+    {","},
+    {"("},
+    {")"},
+
+    /* this needs a better way of encoding the the symbol and stuff */
+    /* currently the expr parse relies on the fact that the attrs have a precedence which is defined as something */
+    {"<<", .flags = UMN_SF_BINOP, .data = 0x80},
+    {">>", .flags = UMN_SF_BINOP, .data = 0x80},
+    {"&", .flags = UMN_SF_BINOP, .data = 0x80},
+    {"^", .flags = UMN_SF_BINOP, .data = 0x80},
+    {"|", .flags = UMN_SF_BINOP, .data = 0x80},
+};
+
 void print_bin(uint64_t value)
 {
     uint64_t n = value;
@@ -145,118 +140,100 @@ void print_bin(uint64_t value)
     } while (j-- != 0);
 }
 
-static umn_Symbol umn_notation_symbols[] = {
-    {","},
-    {"("},
-    {")"},
-
-    /* this needs a better way of encoding the the symbol and stuff */
-    /* currently the expr parse relies on the fact that the attrs have a precedence which is defined as something */
-    {"<<", .attrs.data = 10},
-    {">>", .attrs.data = 10},
-    {"&", .attrs.data = 10},
-    {"^", .attrs.data = 10},
-    {"|", .attrs.data = 10},
-};
-
-uint64_t compute_node(umn_Lexer *lexer, umn_PNode *node, umn_PNode **err_node)
+uint64_t compute_node(const umn_Lexer *lexer, umn_PToken *p, umn_Token *err_token)
 {
     /* TODO: how do i's indicate an error ...*/
     /* could just exfiltrate bya assigning onto som kind of err node */
     /* this is ugly but I would pressume it to work */
-    if (err_node && *err_node)
+    if (err_token && err_token->kind)
         return 0;
 
-    assert(node);
+    assert(p);
+
     uint64_t value, lvalue, rvalue;
-    if (node->token.kind == UMN_KINTEGER)
-        return umn_token_readi(lexer, &node->token);
-    else if (node->token.kind & UMN_KBINOP && node->lvalue && node->rvalue)
+    if (p->token.kind == UMN_KINTEGER)
+        return umn_token_readi(lexer, &p->token);
+    else if (p->token.kind & UMN_KBINOP && p->lvalue && p->rvalue)
     {
-        lvalue = compute_node(lexer, node->lvalue, err_node);
-        rvalue = compute_node(lexer, node->rvalue, err_node);
+        lvalue = compute_node(lexer, p->lvalue, err_token);
+        rvalue = compute_node(lexer, p->rvalue, err_token);
 
         if (NULL)
             ;
-        else if (umn_token_issymbol(lexer, &node->token, "<<"))
+        else if (umn_token_issymbol(lexer, &p->token, "<<"))
             value = lvalue << rvalue;
-        else if (umn_token_issymbol(lexer, &node->token, ">>"))
+        else if (umn_token_issymbol(lexer, &p->token, ">>"))
             value = lvalue >> rvalue;
-        else if (umn_token_issymbol(lexer, &node->token, "&"))
+        else if (umn_token_issymbol(lexer, &p->token, "&"))
             value = lvalue & rvalue;
-        else if (umn_token_issymbol(lexer, &node->token, "^"))
+        else if (umn_token_issymbol(lexer, &p->token, "^"))
             value = lvalue ^ rvalue;
-        else if (umn_token_issymbol(lexer, &node->token, "|"))
+        else if (umn_token_issymbol(lexer, &p->token, "|"))
             value = lvalue | rvalue;
 
         return value;
     }
 
-    if (err_node)
-        *err_node = node;
+    if (err_token)
+        *err_token = p->token;
 
     UMN_TODO("handle differing values");
 }
 
 int main(int argc, char **argv)
 {
-    /* please do not look into this function */
-    /* NOTE: leaking memory of the string ... */
+    umn_PToken_Allocator ptokens = {0};
+    umn_Token token, err_token = {0};
     Conf config = init_conf(argc, argv);
-    /* construct the lexer ... */
 
-    /* allocator */
-    umn_expr_pnode_slab_t nodes = {0};
+    config.lexer.symbols = (umn_Lexer_Symbols){
+        .items = umn_notation_symbols,
+        .count = ARRAY_LEN(umn_notation_symbols),
+    };
 
-    umn_Token token;
-    umn_Lexer lexer = config.lexer;
-    lexer.symbols = umn_notation_symbols;
-    lexer.symbol_count = ARRAY_LEN(umn_notation_symbols);
-
-    umn_PNode *node;
-
-    UMN_SLICE_T(struct {umn_PNode *node; uint64_t value; })
+    UMN_SLICE_T(struct {umn_PToken *p; uint64_t value; })
     computed_values = {0};
 
-    while ((node = umn_expr_parse(&nodes, &lexer)))
+    umn_PToken *p;
+
+    while ((p = umn_expr_parse(&ptokens, &config.lexer)))
     {
-        if ((node->token.kind & UMN_KERR) && node->lvalue != NULL) /* this is such a hack */
+        if (p->token.kind == UMN_KPARSE_ERR && p->lvalue->token.kind == 0)
         {
-            umn_PNode *tmp = node->lvalue;
-            umn_lexer_give(&lexer, &node->token);
-            umn_slab_drop(nodes, node);
-            node = tmp;
+            umn_lexer_give(&config.lexer, &p->rvalue->token);
+            p = p->lvalue->lvalue;
         }
 
-        if (node->token.kind & UMN_KERR)
+        if (p->token.kind & UMN_KERR)
+        {
+            continue;
             UMN_TODO("handle errors");
-
-        /* so i would compute the value here ... */
-        umn_PNode *err_node = NULL;
+        }
 
         umn_slice_reserve(computed_values, 1);
-        computed_values.items[computed_values.count].node = node;
-        computed_values.items[computed_values.count].value = compute_node(&lexer, node, &err_node);
+        computed_values.items[computed_values.count].p = p;
+        computed_values.items[computed_values.count].value = compute_node(&config.lexer, p, &err_token);
         computed_values.count++;
 
-        if (err_node)
+        if (err_token.kind)
         {
+            umn_token_print(&config.lexer, &err_token);
             UMN_TODO("handle errors");
         }
 
         /* read separating commas and stuff  */
-        while (umn_lexer_peek(&lexer, &token) == 0 && (umn_token_issymbol(&lexer, &token, ",")))
-            umn_lexer_take(&lexer, &token);
+        while (umn_lexer_peek(&config.lexer, &token) == 0 && (umn_token_issymbol(&config.lexer, &token, ",")))
+            umn_lexer_take(&config.lexer, &token);
     }
 
     /* iterate over the thing an print the values S*/
+    char buffer[512] = {0};
     for (int i = 0; i < computed_values.count; i++)
     {
         uint64_t value = umn_slice_at(computed_values, i).value;
-        umn_PNode *node = umn_slice_at(computed_values, i).node;
+        p = umn_slice_at(computed_values, i).p;
 
-        umn_pnode_print_recurse(&lexer, node);
-        printf(" = ");
+        printf("%s = ", umn_ptoken_strncpy(&config.lexer, p, buffer, sizeof(buffer)));
 
         bool touched = false;
         for (Enc e = 0; e < Enc_Last; e++)
@@ -290,9 +267,10 @@ int main(int argc, char **argv)
         putchar('\n');
     }
 
-    umn_slab_free(nodes, nodes.items ? nodes.items->items : NULL);
-    free((char *)config.lexer.data);
+    umn_slab_free(ptokens, ptokens.items ? ptokens.items->items : NULL);
+
     /* free the computed values slice */
+    free((char *)config.lexer.data);
     free(computed_values.items);
 
     return 0;

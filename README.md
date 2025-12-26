@@ -5,7 +5,6 @@ A terminal program that converts between number notations.
 ## Usage & Features
 
 
-
 ```sh
 # umn [...options] -- number, number, number, ...
 

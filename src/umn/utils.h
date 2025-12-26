@@ -147,4 +147,22 @@ void umn_slab_free_generic(umn_slab_generic_t *slab, void *allocated, size_t ite
     }
 }
 
+typedef UMN_SLICE_T(char) umn_sb_t;
+int umn_sb_appends(umn_sb_t *sb, const char *s)
+{
+    size_t len = strlen(s);
+    umn_slice_reserve((*sb), (len + 1));
+    memcpy(sb->items + sb->count, s, len);
+    sb->count += len;
+    sb->items[sb->count] = '\0';
+    return len;
+}
+int umn_sb_appendc(umn_sb_t *sb, const char v)
+{
+    umn_slice_reserve((*sb), (2));
+    sb->items[sb->count] = v;
+    sb->items[++sb->count] = '\0';
+    return 1;
+}
+
 #endif
