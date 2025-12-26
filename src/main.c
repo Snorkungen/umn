@@ -198,7 +198,7 @@ int main(int argc, char **argv)
 
     while ((p = umn_expr_parse(&ptokens, &config.lexer)))
     {
-        if (p->token.kind == UMN_KPARSE_ERR && p->lvalue->token.kind == 0)
+        if (p->token.kind & UMN_KPARSE_ERR && p->lvalue->token.kind == 0 && p->lvalue->lvalue->token.kind == UMN_KINTEGER)
         {
             umn_lexer_give(&config.lexer, &p->rvalue->token);
             p = p->lvalue->lvalue;
@@ -206,8 +206,9 @@ int main(int argc, char **argv)
 
         if (p->token.kind & UMN_KERR)
         {
-            continue;
-            UMN_TODO("handle errors");
+            puts("failed to read the following value: ");
+            umn_token_print_error(&config.lexer, &p->token);
+            return 1;
         }
 
         umn_slice_reserve(computed_values, 1);
