@@ -4,10 +4,10 @@
 // #define MANUAL_INLINE
 #define UMN_LEXER_IMPL
 
-#define TEST_2
+// #define TEST_2
 
 #ifdef TEST_2
-#include "umn/3lexer.h"
+#include "umn/2lexer.h"
 #else
 #include "umn/lexer.h"
 #endif
@@ -50,8 +50,7 @@ int main(void)
     umn_perfm_t *inner;
 
     inner = umn_perfm_create_new(NULL, "lexer");
-    perfm_lexer_literal = umn_perfm_create_new(inner, "literal");
-    perfm_lexer_keyword = umn_perfm_create_new(inner, "keyword");
+
 
     umn_Token token;
     // umn_Lexer lexer = init_lexer("1 0.0 0a b 'hello' 0x254 0b11153 0654");

@@ -10,6 +10,7 @@
 /* umn_token_flag(token)*/
 
 #include "./utils.h"
+
 #include <stdio.h>
 #include <ctype.h>
 
@@ -37,9 +38,8 @@ typedef struct
 #define UMN_SYMBOLS_MAX_COUNT 48
 typedef struct
 {
-  uint32_t flags; /* the symbols is a special thing */
   uint32_t count;
-  umn_Symbol *items;
+  const umn_Symbol *items;
 } umn_Lexer_Symbols;
 
 typedef struct
@@ -201,9 +201,11 @@ static inline bool umn_lexer_read_fraction(umn_Lexer *lexer, umn_Token *token, w
 
 int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
 {
+
   wchar_t curr;
   memset(token, 0, sizeof(*token));
-  lexer->separation_pos = -1;
+
+  lexer->separation_pos = (size_t)-1;
 
   /* before we begin skip whitespace */
   while (lexer->data[lexer->position] != '\0' && ((curr = lexer->data[lexer->position]) <= ' ' || isspace(curr)))
@@ -229,20 +231,24 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
   token->line_offset = lexer->position - lexer->line_begin;
   token->kind = isdigit(curr) ? UMN_KINTEGER : UMN_KLITERAL;
 
-  /* read literals */
-  while (token->kind == UMN_KLITERAL && curr != '\0' && (curr > ' ' && !isspace(curr)))
+  if (curr == umn_Enc_String_1 || curr == umn_Enc_String_2)
   {
-    /* break on special characters */
-    if (curr == umn_Enc_String_1 || curr == umn_Enc_String_2)
+    token->kind = UMN_KSTRING;
+  }
+
+  bool b = false;
+  while (token->kind == UMN_KLITERAL)
+  {
+    switch (curr)
     {
-      if (lexer->position == token->begin)
-      {
-        token->kind = UMN_KSTRING;
-      }
-      break;
+    case '\0':
+    case '\\':
+    case umn_Enc_String_1:
+    case umn_Enc_String_2:
+      b = true;
     }
 
-    if (curr == '\\')
+    if (b || isspace(curr))
       break;
 
     lexer->position = lexer->next_position;
@@ -276,7 +282,6 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
     }
   }
 
-  /* tight loops for integer and fraction stuff, NOTE: read integer might fail into a fraction */
   while (token->kind == UMN_KINTEGER && umn_lexer_read_integer(lexer, token, curr))
   {
     curr = lexer->data[++lexer->position];
@@ -334,57 +339,60 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
 {
   /* just statically allocated on the stack a thing */
   const umn_Symbol *symbol;
-  static uint32_t cached_lens[UMN_SYMBOLS_MAX_COUNT];
-  assert(ARRAY_LEN(cached_lens) > lexer->symbols.count);
-  int best = -1;
-
-  for (unsigned i = 0; i < lexer->symbols.count; i++)
-    cached_lens[i] = strlen(lexer->symbols.items[i].s);
+  const char *symbol_s;
+  int best = -1, best_count = 0;
 
   for (unsigned i = 0; i < lexer->symbols.count; i++)
   {
-    symbol = lexer->symbols.items + i;
+    symbol_s = lexer->symbols.items[i].s;
 
-    if (symbol->s == NULL || cached_lens[i] > token->length)
+    if (symbol_s == NULL)
       continue;
 
     unsigned count = 0;
-    while (count < cached_lens[i] && lexer->data[token->begin + count] == symbol->s[count])
+    while (lexer->data[token->begin + count] == symbol_s[count] && symbol_s[count] != '\0')
       count++;
 
-    if (count == cached_lens[i] && (best < 0 || count > cached_lens[best]))
+    if (symbol_s[count] == '\0' && count > best_count)
+    {
       best = i;
+      best_count = count;
+    }
   }
 
   if (best >= 0)
   {
-
     token->kind = UMN_KSYMBOL;
-    token->length = cached_lens[best];
+    token->length = best_count;
     lexer->position = token->begin + token->length;
 
     /* we still need a better way of doing this  */
-    symbol = lexer->symbols.items + best;
-    token->data = symbol->data;
-    token->flags = symbol->flags;
+    token->data = lexer->symbols.items[best].data;
+    token->flags = lexer->symbols.items[best].flags;
 
     return 0;
   }
 
-  /* else now we must check if there is a strong symbol that could cause trouble */
+  static uint32_t cached_lens[UMN_SYMBOLS_MAX_COUNT];
+  assert(ARRAY_LEN(cached_lens) > lexer->symbols.count);
+
+  for (unsigned i = 0; i < lexer->symbols.count; i++)
+    cached_lens[i] = strlen(lexer->symbols.items[i].s);
+
   for (unsigned i = 1; i < token->length; i++)
   {
+
     for (unsigned j = 0; j < lexer->symbols.count; j++)
     {
       symbol = lexer->symbols.items + j;
 
-      if ((symbol->flags == 0 || symbol->flags & lexer->symbols.flags) /* symbol must be strong */ &&
-          ((token->length - i) >= cached_lens[j]) /* symbol must fit into the remaining token */ &&
+      if (((token->length - i) >= cached_lens[j]) /* symbol must fit into the remaining token */ &&
           strncmp(&lexer->data[token->begin + i], symbol->s, cached_lens[j]) == 0)
       {
         /* we's found something quit */
         token->length = i;
         lexer->position = token->begin + token->length;
+
         return 0;
       }
     }
@@ -462,20 +470,18 @@ int umn_token__kind_to_str(const umn_Token *token, char *dest, const size_t size
   if (token->kind & UMN_KERR)
     n += snprintf(dest + n, size - n, "ERR:");
 
+  /* TODO: the reserved bits are flags so treat it as such, i.e. multiple hits */
   if (token->kind & UMN_K__RESERVED__)
   {
     umn_Token_Kind v = (token->kind & UMN_K__RESERVED__);
-    unsigned int rv = 0;
-    while (UMN_K__1 >> rv)
-      rv++;
 
-    v >>= (rv - 1);
-    rv = 1;
-    while (v >>= 1)
-      rv++;
-
-    /* TODO: check if there is a reserved name defined */
-    n += snprintf(dest + n, size - n, "R%d:", rv);
+    for (int r = 0; r < 8; r++)
+    {
+      if ((v & (UMN_K__1 << r)))
+      {
+        n += snprintf(dest + n, size - n, "R%d:", r + 1);
+      }
+    }
   }
 
   char *kind = NULL;
