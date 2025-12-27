@@ -31,55 +31,9 @@ uint64_t compute(const umn_Lexer *lexer, umn_PToken *root)
     return res;
 }
 
-int main(void)
+void test_1(umn_PToken_Allocator *ptokens, umn_Lexer *lexer)
 {
-    umn_PToken_Allocator ptokens = {0};
-    umn_Lexer lexer = {
-        .data = "2 + 4 + 8 * 6",
-        .symbols = umn_expr_symbols,
-    };
-
-    umn_PToken *ptoken;
-
-    lexer.position = 0;
-    lexer.data = "32";
-    ptoken = umn_expr_parse(&ptokens, &lexer);
-    umn_ptoken_tree_print(&lexer, ptoken);
-
-    if (ptoken->token.kind == UMN_KERR)
-    {
-        umn_ptoken_tree_print(&lexer, ptoken->lvalue);
-        umn_ptoken_tree_print(&lexer, ptoken->rvalue);
-
-    }
-
-    // ptoken = umn_expr_parse(&ptokens, &lexer);
-    // umn_ptoken_tree_print(&lexer, ptoken);
-
-    // lexer.position = 0;
-    // lexer.data = " 0 + 1 * 2 * 4 + 8";
-    // ptoken = umn_expr_parse(&ptokens, &lexer);
-    // umn_ptoken_tree_print(&lexer, ptoken);
-
-    // lexer.position = 0;
-    // lexer.data = " (0) + 1 * 2 * 4 + 8";
-    // ptoken = umn_expr_parse(&ptokens, &lexer);
-    // umn_ptoken_tree_print(&lexer, ptoken);
-
-    // lexer.position = 0;
-    // lexer.data = " (0 + 1) * 2 * 4 + 8";
-    // ptoken = umn_expr_parse(&ptokens, &lexer);
-    // umn_ptoken_tree_print(&lexer, ptoken);
-
-    // lexer.position = 0;
-    // lexer.data = " (0 + 1) * 2 * (4 + 8)";
-    // ptoken = umn_expr_parse(&ptokens, &lexer);
-    // umn_ptoken_tree_print(&lexer, ptoken);
-
-    // lexer.position = 0;
-    // lexer.data = "(1)";
-    // ptoken = umn_expr_parse(&ptokens, &lexer);
-    // umn_ptoken_tree_print(&lexer, ptoken);
+    char cbuffer[256] = {0};
 
     const struct
     {
@@ -99,38 +53,59 @@ int main(void)
         {"(1 * 1) + 2 + 3 +4 + 5+ 6 * 1", 21},
     };
 
-    char cbuffer[256] = {0};
-
+    umn_PToken *res;
     for (int i = 0; i < ARRAY_LEN(tests); i++)
     {
         /* soft reset the slab allocator */
-        if (ptokens.items)
-            umn_slab_drop(ptokens, ptokens.items->items);
+        if (ptokens->items)
+            umn_slab_drop((*ptokens), ptokens->items->items);
 
-        lexer.position = 0;
-        lexer.data = tests[i].str;
+        lexer->position = 0;
+        lexer->data = tests[i].str;
 
-        puts("---------------------------------------");
-        puts(lexer.data);
-        umn_PToken *res = umn_expr_parse(&ptokens, &lexer);
+        res = umn_expr_parse(ptokens, lexer);
 
-        int64_t value = compute(&lexer, res);
+        int64_t value = compute(lexer, res);
 
         printf("%s = %ld\n",
-               umn_ptoken_strncpy(&lexer, res, cbuffer, sizeof(cbuffer)),
-               compute(&lexer, res));
+               umn_ptoken_strncpy(lexer, res, cbuffer, sizeof(cbuffer)),
+               value);
 
         if (value - tests[i].expected)
         {
             printf("\033[31m");
-            umn_ptoken_tree_print(&lexer, res);
+            umn_ptoken_tree_print(lexer, res);
             printf("\033[0m");
             break;
         }
     }
 
     /* free all nodes  */
-    umn_slab_free(ptokens, ptokens.items->items);
+    umn_slab_free((*ptokens), ptokens->items->items);
+}
+
+
+int main(void)
+{
+    char cbuffer[256] = {0};
+    umn_PToken_Allocator ptokens = {0};
+    umn_Lexer lexer = {
+        .symbols = umn_expr_symbols,
+    };
+
+    umn_PToken *ptoken;
+
+    test_1(&ptokens, &lexer);
+    puts("--------------------------");
+    /* parse a function and do things ... */
+
+    /* f(x) = 2 * x */
+    lexer.position = 0;
+    // lexer.data = "f(x,) = 2 * x, f(3)"; /* I want this to compute to 6*/
+    lexer.data = "f(x,) = x + 1"; /* I want this to compute to 6*/
+
+    ptoken = umn_expr_parse_ext(&ptokens, &lexer, NULL);
+    umn_ptoken_tree_print(&lexer, ptoken);
 
     return 0;
 }
