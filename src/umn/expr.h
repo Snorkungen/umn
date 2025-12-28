@@ -292,39 +292,18 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
         }
         else if (!expect_value && bstack.count > 1 && umn_token_issymbol(lexer, &token, ")"))
         {
-            unsigned base_count = umn_slice_pop(bstack);
-            ptoken = umn_slice_at(stack, base_count - 2);
+            unsigned stack_offset = umn_slice_pop(bstack) - 1;
+            
+            ptoken = umn_expr_parse__eval_stack(pallocator, stack.count - stack_offset, stack.items + stack_offset);
+            stack.count = stack_offset;
 
-            for (unsigned i = base_count - 1; i < (stack.count - 1); i++)
-            {
-                assert(umn_slice_at(stack, i)->rvalue == NULL);
-                umn_slice_at(stack, i)->rvalue = umn_slice_at(stack, i + 1);
-            }
+            assert(ptoken); /* since this branch asserts that the state has already received a value otherwise `expect_value` would be truthy */
 
-            if (umn_slice_at(stack, base_count - 1)->token.kind == 0)
-            {
-                assert(umn_slice_at(stack, base_count - 1)->lvalue);
-
-                void *tmp = umn_slice_at(stack, base_count - 1)->lvalue;
-                memcpy(umn_slice_at(stack, base_count - 1), tmp, sizeof(umn_PToken));
-                umn_slab_drop((*pallocator), tmp);
-
-                umn_expr_parse__set_value(ptoken, umn_slice_at(stack, base_count - 1));
-            }
-            else if (ptoken->token.kind == 0)
-            {
-                /* leaking a node but oh-well */
-                memcpy(ptoken, umn_slice_at(stack, base_count - 1), sizeof(umn_PToken));
+            if (ptoken->token.kind & UMN_KBINOP)
                 ptoken->token.kind |= UMN_KBRACK;
-            }
-            else
-            {
-                assert(ptoken->rvalue == NULL);
-                ptoken->rvalue = umn_slice_at(stack, base_count - 1);
-                ptoken->rvalue->token.kind |= UMN_KBRACK;
-            }
 
-            stack.count = base_count - 1;
+            umn_expr_parse__set_value(umn_slice_at(stack, stack_offset - 1), ptoken);
+
             continue;
         }
         else if (!expect_value && (token.kind == UMN_KSYMBOL && (token.flags & UMN_SF_BINOP)) && umn_slice_at(stack, -1)->token.kind == 0)
