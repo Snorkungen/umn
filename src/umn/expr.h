@@ -224,18 +224,14 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
     struct
     {
         size_t count, capacity;
-        struct
-        {
-            umn_PToken *ptoken;
-            unsigned bstack_count;
-        } items[16];
-    } exprs_stack = {.capacity = ARRAY_LEN(exprs_stack.items)};
+        unsigned items[ARRAY_LEN(stack.items) >> 2];
+    } bstack = {.capacity = ARRAY_LEN(bstack.items)}; /* scope stack */
 
     struct
     {
         size_t count, capacity;
-        unsigned items[ARRAY_LEN(stack.items) >> 2];
-    } bstack = {.capacity = ARRAY_LEN(bstack.items)}; /* scope stack */
+        unsigned items[16]; /* this is a bstack count */
+    } exprs_stack = {.capacity = ARRAY_LEN(exprs_stack.items)};
 
     umn_PToken *ptoken;
     umn_Token token;
@@ -248,21 +244,21 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
     while (umn_lexer_next(lexer, &token) == 0 && token.kind)
     {
 
-        if (!expect_value && exprs_stack.count > 0 && umn_slice_at(exprs_stack, -1).bstack_count == bstack.count && umn_token_issymbol(lexer, &token, ","))
+        if (!expect_value && exprs_stack.count > 0 && umn_slice_at(exprs_stack, -1) == bstack.count && umn_token_issymbol(lexer, &token, ","))
         {
-            unsigned stack_offset = umn_slice_at(bstack, umn_slice_at(exprs_stack, -1).bstack_count - 1) - 1;
+            unsigned stack_offset = umn_slice_at(bstack, umn_slice_at(exprs_stack, -1) - 1) - 1;
             ptoken = umn_expr_parse__eval_stack(pallocator, stack.count - stack_offset, stack.items + stack_offset);
             assert(ptoken);
 
-            umn_ptoken_ll_append(umn_slice_at(exprs_stack, -1).ptoken, ptoken);
+            umn_ptoken_ll_append(umn_slice_at(stack, stack_offset - 1), ptoken);
 
-            stack.count = stack.count - stack_offset;
+            stack.count = stack_offset;
             if (umn_slice_push(stack, umn_ptoken_alloc(pallocator, NULL)) == NULL)
                 UMN_TODO("handle: memory error");
         }
-        else if (exprs_stack.count > 0 && umn_slice_at(exprs_stack, -1).bstack_count == bstack.count && umn_token_issymbol(lexer, &token, ")"))
+        else if (exprs_stack.count > 0 && umn_slice_at(exprs_stack, -1) == bstack.count && umn_token_issymbol(lexer, &token, ")"))
         { /*  commit the most recent thing and end the expected series */
-            unsigned stack_offset = umn_slice_at(bstack, umn_slice_at(exprs_stack, -1).bstack_count - 1) - 1;
+            unsigned stack_offset = umn_slice_at(bstack, umn_slice_at(exprs_stack, -1) - 1) - 1;
 
             if (expect_value)
             {
@@ -273,14 +269,18 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
             {
                 ptoken = umn_expr_parse__eval_stack(pallocator, stack.count - stack_offset, stack.items + stack_offset);
                 assert(ptoken);
-                umn_ptoken_ll_append(umn_slice_at(exprs_stack, -1).ptoken, ptoken);
+
+                umn_ptoken_ll_append(umn_slice_at(stack, stack_offset - 1), ptoken);
             }
 
-            stack.count = stack.count - stack_offset; /* reset the stack count */
+            stack.count = stack_offset; /* reset the stack count */
+
             umn_slice_pop(bstack);
-            umn_expr_parse__set_value(umn_slice_at(stack, -1), umn_slice_pop(exprs_stack).ptoken);
+            umn_slice_pop(exprs_stack);
+            umn_slice_pop(stack);
 
             expect_value = false;
+
             continue;
         }
         else if (expect_value && umn_token_issymbol(lexer, &token, "("))
@@ -293,7 +293,7 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
         else if (!expect_value && bstack.count > 1 && umn_token_issymbol(lexer, &token, ")"))
         {
             unsigned stack_offset = umn_slice_pop(bstack) - 1;
-            
+
             ptoken = umn_expr_parse__eval_stack(pallocator, stack.count - stack_offset, stack.items + stack_offset);
             stack.count = stack_offset;
 
@@ -302,7 +302,27 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
             if (ptoken->token.kind & UMN_KBINOP)
                 ptoken->token.kind |= UMN_KBRACK;
 
-            umn_expr_parse__set_value(umn_slice_at(stack, stack_offset - 1), ptoken);
+            if (ptoken->token.kind & UMN_KBINOP && umn_slice_at(stack, stack_offset - 1)->lvalue == NULL)
+            {
+                /* NOTE: leaking a ptoken  */
+                memcpy(umn_slice_at(stack, stack_offset - 1), ptoken, sizeof(*ptoken));
+                /*
+                    TODO: solve the ptoken leak
+                    allocated       (nil),  (=),    (x),    (1)
+                    after memcpy    (=),    (=),    (x),    (1)
+                                     0       1       2       3
+
+                    clone the tree
+                    starting from index 0
+
+                    a way of doing this is create a copy of  pallocator and drop starting from 0
+                    then knowing that we own the pallocator and then copy willy nilly
+                */
+            }
+            else
+            {
+                umn_expr_parse__set_value(umn_slice_at(stack, stack_offset - 1), ptoken);
+            }
 
             continue;
         }
@@ -359,15 +379,19 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
         { /* parse the function thing ... */
             assert(exprs_stack.count < exprs_stack.capacity && ("exprs_stack overflow"));
 
+            /* push the the function thing */
+            token.kind |= UMN_KFNC;
+            if (umn_slice_push(stack, umn_ptoken_alloc(pallocator, &token)) == NULL)
+                UMN_TODO("handle: memory error");
+
+            /* already set the function as the thing ... */
+            umn_expr_parse__set_value(umn_slice_at(stack, -2), umn_slice_at(stack, -1));
+
             if (umn_slice_push(stack, umn_ptoken_alloc(pallocator, NULL)) == NULL)
                 UMN_TODO("handle: memory error");
 
             umn_slice_push(bstack, stack.count);
-
-            token.kind |= UMN_KFNC;
-            umn_slice_at(exprs_stack, exprs_stack.count).bstack_count = bstack.count;
-            umn_slice_at(exprs_stack, exprs_stack.count).ptoken = umn_ptoken_alloc(pallocator, &token);
-            exprs_stack.count++;
+            umn_slice_push(exprs_stack, bstack.count);
 
             umn_lexer_next(lexer, &token);
             continue; /* avoid the next iter expects a value */
@@ -393,9 +417,7 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
 
             umn_PToken *err_ptoken = umn_ptoken_alloc(pallocator, &token);
             err_ptoken->token.kind = UMN_KPARSE_ERR;
-            err_ptoken->lvalue = exprs_stack.count
-                                     ? umn_slice_at(exprs_stack, -1).ptoken
-                                     : umn_ptoken_alloc(pallocator, &token);
+            err_ptoken->lvalue = umn_slice_at(stack, -1);
             err_ptoken->rvalue = umn_ptoken_alloc(pallocator, &token);
 
             return err_ptoken;

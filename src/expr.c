@@ -102,7 +102,7 @@ int main(void)
     /* f(x) = 2 * x */
     lexer.position = 0;
     // lexer.data = "f(x,) = 2 * x, f(3)"; /* I want this to compute to 6*/
-    lexer.data = "f(x,) = x + 1"; /* I want this to compute to 6*/
+    lexer.data = "f(x, y = 2) = x + 1"; /* I want this to compute to 6*/
 
     ptoken = umn_expr_parse_ext(&ptokens, &lexer, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
