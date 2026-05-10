@@ -126,7 +126,7 @@ int main(void)
     puts("--------------------------");
 
     lexer.position = 0;
-    lexer.data = "+10 * +++(1 * 2)";
+    lexer.data = "+10 * +++(1 * 2) = +1 + x, 1 + 1";
     ptoken = umn_expr_parse(&ptokens, &lexer);
     umn_ptoken_tree_print(&lexer, ptoken);
     umn_ptoken_strncpy(&lexer, ptoken, cbuffer, sizeof(cbuffer));

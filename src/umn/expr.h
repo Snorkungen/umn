@@ -465,7 +465,7 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
         else
         {
             /* see if this can still resolve a value and stuff */
-            if (stack.count > 1 && umn_slice_at(stack, -1)->lvalue == NULL)
+            if (stack.count > 1 && (umn_slice_at(stack, -1)->token.kind & UMN_KBINOP) && umn_slice_at(stack, -1)->lvalue == NULL)
                 umn_slab_drop((*pallocator), umn_slice_pop(stack)); /* drop the empty token and stuff */
 
             if (bstack.count == 1 && (umn_slice_at(stack, -1)->rvalue || (umn_slice_at(stack, -1)->lvalue && umn_slice_at(stack, -1)->token.kind == 0)))
