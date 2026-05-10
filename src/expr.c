@@ -92,7 +92,7 @@ static const umn_Symbol umn_expr_symbols__[] = {
     {.s = "("},
     {.s = ")"},
     {.s = "=", .flags = UMN_SF_BINOP, .data = 16},
-    {.s = "+", .flags = UMN_SF_BINOP, .data = 18},
+    {.s = "+", .flags = UMN_SF_BINOP | UMN_SF_UNARY_L, .data = 18},
     {.s = "*", .flags = UMN_SF_BINOP, .data = 19},
     {.s = "**", .flags = UMN_SF_BINOP, .data = 20},
 };
@@ -114,14 +114,23 @@ int main(void)
     test_1(&ptokens, &lexer);
     puts("--------------------------");
     /* parse a function and do things ... */
-
+    
     /* f(x) = 2 * x */
     lexer.position = 0;
     // lexer.data = "f(x,) = 2 * x, f(3)"; /* I want this to compute to 6*/
     lexer.data = "f(x, y = 2) = x + 1"; /* I want this to compute to 6*/
-
+    
     ptoken = umn_expr_parse_ext(&ptokens, &lexer, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
+
+    puts("--------------------------");
+
+    lexer.position = 0;
+    lexer.data = "+10 * +++(1 * 2)";
+    ptoken = umn_expr_parse(&ptokens, &lexer);
+    umn_ptoken_tree_print(&lexer, ptoken);
+    umn_ptoken_strncpy(&lexer, ptoken, cbuffer, sizeof(cbuffer));
+    puts(cbuffer);
 
     return 0;
 }
