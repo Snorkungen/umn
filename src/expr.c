@@ -1,4 +1,6 @@
-#define UMN_LEXER_IMPL
+#define UMN_LEXER_IMPLEMENTATION
+#define UMN_UTILS_IMPLEMENTATION
+#define UMN_EXPR_IMPLEMENTATION
 
 #include "umn/expr.h"
 
@@ -84,6 +86,20 @@ void test_1(umn_PToken_Allocator *ptokens, umn_Lexer *lexer)
     umn_slab_free((*ptokens), ptokens->items->items);
 }
 
+static const umn_Symbol umn_expr_symbols__[] = {
+    {.s = "."},
+    {.s = ",", .flags = UMN_SF_BARRR},
+    {.s = "("},
+    {.s = ")"},
+    {.s = "=", .flags = UMN_SF_BINOP, .data = 16},
+    {.s = "+", .flags = UMN_SF_BINOP, .data = 18},
+    {.s = "*", .flags = UMN_SF_BINOP, .data = 19},
+    {.s = "**", .flags = UMN_SF_BINOP, .data = 20},
+};
+static const umn_Lexer_Symbols umn_expr_symbols = {
+    .count = ARRAY_LEN(umn_expr_symbols__),
+    .items = umn_expr_symbols__,
+};
 
 int main(void)
 {

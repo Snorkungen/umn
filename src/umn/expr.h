@@ -4,15 +4,25 @@
 #include "utils.h"
 #include "lexer.h"
 
-static bool umn_lexer_peek_token_issymbol(const umn_Lexer *lexer, const char *literal);
-static inline bool umn_lexer_peek_token_issymbol(const umn_Lexer *lexer, const char *literal)
-{
-    umn_Token token;
-    if (umn_lexer_peek(lexer, &token))
-        return false;
+/*
+    DEFAULT SYMBOLS TO GET GOING
 
-    return umn_token_issymbol(lexer, &token, literal);
-}
+    static const umn_Symbol umn_expr_symbols__[] = {
+        {.s = "."},
+        {.s = ",", .flags = UMN_SF_BARRR },
+        {.s = "("},
+        {.s = ")"},
+        {.s = "=", .flags = UMN_SF_BINOP, .data = 16},
+        {.s = "+", .flags = UMN_SF_BINOP, .data = 18},
+        {.s = "*", .flags = UMN_SF_BINOP, .data = 19},
+        {.s = "**", .flags = UMN_SF_BINOP, .data = 20},
+    };
+    static const umn_Lexer_Symbols umn_expr_symbols = {
+        .count = ARRAY_LEN(umn_expr_symbols__),
+        .items = umn_expr_symbols__,
+    };
+
+*/
 
 static const umn_Token_Kind UMN_KBINOP = UMN_K__1,
                             UMN_KBRACK = UMN_K__2,
@@ -20,21 +30,7 @@ static const umn_Token_Kind UMN_KBINOP = UMN_K__1,
                             UMN_KPARSE_ERR = UMN_K__8;
 
 static const uint32_t UMN_SF_BINOP = 0x80;
-
-static const umn_Symbol umn_expr_symbols__[] = {
-    /* minimum set of symbols required ... */
-    {","},
-    {"("},
-    {")"},
-    {"=", .flags = UMN_SF_BINOP, .data = 16},
-    {"+", .flags = UMN_SF_BINOP, .data = 18},
-    {"*", .flags = UMN_SF_BINOP, .data = 19},
-    {"**", .flags = UMN_SF_BINOP, .data = 20},
-};
-static const umn_Lexer_Symbols umn_expr_symbols = {
-    .count = ARRAY_LEN(umn_expr_symbols__), /* manually counting is annoying */
-    .items = umn_expr_symbols__,
-};
+static const uint32_t UMN_SF_BARRR = 0x80 << 1; /* The sybmol is a barrier, where the tree builder, can fail succesfully */
 
 /* parse token is an extension of a token with */
 typedef struct umn_PToken
@@ -46,6 +42,31 @@ typedef struct umn_PToken
 } umn_PToken;
 
 typedef UMN_SLAB_T(umn_PToken) umn_PToken_Allocator;
+
+static inline bool umn_lexer_peek_token_issymbol(const umn_Lexer *lexer, const char *literal);
+
+umn_PToken *umn_ptoken_alloc(umn_PToken_Allocator *allocator, const umn_Token *token);
+const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken, char *dest, size_t dsize);
+void umn_ptoken_tree_print(const umn_Lexer *lexer, const umn_PToken *ptoken);
+
+/* Append to a linked list of ptokens */
+static umn_PToken *umn_ptoken_ll_append(umn_PToken *ll, umn_PToken *ptoken);
+
+typedef umn_PToken *umn_expr_parse_value_t(umn_PToken_Allocator *pallocator, umn_Lexer *lexer, const umn_Token *token);
+umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexer, umn_expr_parse_value_t *parse_value_fptr);
+umn_PToken *umn_expr_parse(umn_PToken_Allocator *pallocator, umn_Lexer *lexer);
+
+#ifdef UMN_EXPR_IMPLEMENTATION
+#undef UMN_EXPR_IMPLEMENTATION
+
+static inline bool umn_lexer_peek_token_issymbol(const umn_Lexer *lexer, const char *literal)
+{
+    umn_Token token;
+    if (umn_lexer_peek(lexer, &token))
+        return false;
+
+    return umn_token_issymbol(lexer, &token, literal);
+}
 
 umn_PToken *umn_ptoken_alloc(umn_PToken_Allocator *allocator, const umn_Token *token)
 {
@@ -117,12 +138,22 @@ const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken,
 
             n += snprintf(dest + n, dsize - n, ")");
         }
+        else if (ptoken->token.kind == UMN_KLITERAL && ptoken->prev)
+        {
+            for (const umn_PToken *child = ptoken; child; child = child->next)
+                n += snprintf(dest + n, dsize - n, "%s.",
+                              umn_token_strncpy(lexer, &child->token, buffer, sizeof(buffer)));
+            n--; /* remove trailing . */
+        }
         else
         {
             n += snprintf(dest + n, dsize - n, "%s",
                           umn_token_strncpy(lexer, &ptoken->token, buffer, sizeof(buffer)));
         }
     }
+
+    /* Add trailing null byte */
+    dest[n < dsize ? n : dsize - 1] = '\0';
 
     return dest;
 }
@@ -176,7 +207,7 @@ void umn_ptoken_tree_print(const umn_Lexer *lexer, const umn_PToken *ptoken)
         umn_token_print(lexer, &item.ptoken->token);
 
         item.depth_map |= 1 << depth;
-        if (item.ptoken->token.kind & UMN_KBINOP || item.ptoken->token.kind == UMN_KPARSE_ERR || item.ptoken->token.kind == 0)
+        if (item.ptoken->token.kind & UMN_KBINOP || (item.ptoken->token.kind & UMN_KPARSE_ERR) || item.ptoken->token.kind == 0)
         {
             umn_slice_push(stack, ((stack_item_t){item.ptoken->rvalue, item.depth_map, true}));
             umn_slice_push(stack, ((stack_item_t){item.ptoken->lvalue, item.depth_map}));
@@ -189,7 +220,6 @@ void umn_ptoken_tree_print(const umn_Lexer *lexer, const umn_PToken *ptoken)
     }
 }
 
-static umn_PToken *umn_ptoken_ll_append(umn_PToken *ll, umn_PToken *ptoken);
 static inline umn_PToken *umn_ptoken_ll_append(umn_PToken *ll, umn_PToken *ptoken)
 {
     if (ll->next == NULL)
@@ -205,14 +235,10 @@ static inline umn_PToken *umn_ptoken_ll_append(umn_PToken *ll, umn_PToken *ptoke
     return ll->next;
 }
 
-/* compute would be client side logic */
-
-umn_PToken *umn_expr_parse(umn_PToken_Allocator *pallocator, umn_Lexer *lexer);
-
-typedef umn_PToken *umn_expr_parse_value_t(umn_PToken_Allocator *pallocator, umn_Lexer *lexer, umn_Token *token);
-
 static umn_PToken *umn_expr_parse__set_value(umn_PToken *ptoken, umn_PToken *value);
 static umn_PToken *umn_expr_parse__eval_stack(umn_PToken_Allocator *pallocator, size_t count, umn_PToken *items[]);
+static umn_PToken *umn_expr_parse__dot_sep_literal(umn_PToken_Allocator *pallocator, umn_Lexer *lexer, umn_Token *token);
+
 umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexer, umn_expr_parse_value_t *parse_value_fptr)
 {
     struct
@@ -370,7 +396,7 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
             /* TODO: come back and look at what I'm attempting to do */
             if (token.kind & UMN_KERR)
                 break;
-            else if (ptoken->token.kind == UMN_KPARSE_ERR)
+            else if ((ptoken->token.kind & UMN_KPARSE_ERR))
                 return ptoken; /* the thing can figure out the parse error */
 
             umn_expr_parse__set_value(umn_slice_at(stack, -1), ptoken);
@@ -396,7 +422,11 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
             umn_lexer_next(lexer, &token);
             continue; /* avoid the next iter expects a value */
         }
-        else if (expect_value && (token.kind == UMN_KINTEGER || token.kind == UMN_KLITERAL))
+        else if (expect_value && (token.kind == UMN_KLITERAL && umn_lexer_peek_token_issymbol(lexer, ".") && (ptoken = umn_expr_parse__dot_sep_literal(pallocator, lexer, &token)))) /* or should this be a function*/
+        {
+            umn_expr_parse__set_value(umn_slice_at(stack, -1), ptoken);
+        }
+        else if (expect_value && ((token.kind & UMN_KNUMERIC) || token.kind == UMN_KLITERAL || token.kind == UMN_KSTRING))
         {
             if ((ptoken = umn_ptoken_alloc(pallocator, &token)) == NULL)
                 UMN_TODO("handle: memory error");
@@ -409,14 +439,17 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
             if (stack.count > 1 && umn_slice_at(stack, -1)->lvalue == NULL)
                 umn_slab_drop((*pallocator), umn_slice_pop(stack)); /* drop the empty token and stuff */
 
-            if (umn_slice_at(stack, -1)->rvalue || (umn_slice_at(stack, -1)->lvalue && umn_slice_at(stack, -1)->token.kind == 0))
-            {
-                umn_lexer_give(lexer, &token);
-                break;
+            if (bstack.count == 1 && (umn_slice_at(stack, -1)->rvalue || (umn_slice_at(stack, -1)->lvalue && umn_slice_at(stack, -1)->token.kind == 0)))
+            { /* TODO: figure out a better way to exit successfully when the expression has been parsed */
+                if ((token.kind & (UMN_KSYMBOL & ~UMN_KLITERAL)) == 0 || (token.kind == UMN_KSYMBOL && (bool)(token.flags & UMN_SF_BARRR)))
+                {
+                    umn_lexer_give(lexer, &token);
+                    break;
+                }
             }
 
             umn_PToken *err_ptoken = umn_ptoken_alloc(pallocator, &token);
-            err_ptoken->token.kind = UMN_KPARSE_ERR;
+            err_ptoken->token.kind = UMN_KPARSE_ERR | UMN_KERR;
             err_ptoken->lvalue = umn_slice_at(stack, -1);
             err_ptoken->rvalue = umn_ptoken_alloc(pallocator, &token);
 
@@ -430,9 +463,10 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
         return umn_ptoken_alloc(pallocator, &token);
 
     return umn_expr_parse__eval_stack(pallocator, stack.count, stack.items);
+    ;
 }
 
-umn_PToken *umn_expr_parse(umn_PToken_Allocator *pallocator, umn_Lexer *lexer)
+inline umn_PToken *umn_expr_parse(umn_PToken_Allocator *pallocator, umn_Lexer *lexer)
 {
     return umn_expr_parse_ext(pallocator, lexer, NULL);
 }
@@ -469,4 +503,31 @@ inline static umn_PToken *umn_expr_parse__eval_stack(umn_PToken_Allocator *pallo
     return items[0];
 }
 
+/* parses a singly linked list of do seperated literals */
+static umn_PToken *umn_expr_parse__dot_sep_literal(umn_PToken_Allocator *pallocator, umn_Lexer *lexer, umn_Token *token)
+{
+    umn_PToken *ptoken = NULL, *next = NULL;
+
+    if ((ptoken = umn_ptoken_alloc(pallocator, token)) == NULL)
+        UMN_TODO("allocator failed");
+
+    while (umn_lexer_next(lexer, token) == 0 && umn_token_issymbol(lexer, token, "."))
+    {
+        if (umn_lexer_next(lexer, token) || token->kind != UMN_KLITERAL)
+        {
+            token->kind |= UMN_KERR;
+            return NULL;
+        }
+
+        if ((next = umn_ptoken_alloc(pallocator, token)) == NULL)
+            UMN_TODO("allocator failed");
+
+        umn_ptoken_ll_append(ptoken, next);
+    }
+
+    assert(ptoken->prev); /* atleast one thing must get inserted into the linked list */
+    return ptoken;
+}
+
+#endif
 #endif

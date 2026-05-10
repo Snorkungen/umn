@@ -1,7 +1,8 @@
 
-#include "umn/perfm.h"
+#define UMN_LEXER_IMPLEMENTATION
+#define UMN_UTILS_IMPLEMENTATION
 
-#define UMN_LEXER_IMPL
+#include "umn/perfm.h"
 #include "umn/lexer.h"
 
 static umn_Symbol symbols[] = {

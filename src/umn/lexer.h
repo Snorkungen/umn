@@ -32,7 +32,7 @@ typedef struct
 {
   const char *s;
   const uint32_t flags;
-  const uint32_t data;
+  const int32_t data; /* this is an int */
 } umn_Symbol;
 
 #define UMN_SYMBOLS_MAX_COUNT 48
@@ -66,7 +66,7 @@ typedef struct
 
   umn_Token_Encoding encoding;
   uint32_t flags; /* generic thing that can be used for stuff */
-  uint32_t data;
+  int32_t data;
 } umn_Token;
 
 static const umn_Token_Kind UMN_KEOF = 0,
@@ -85,7 +85,7 @@ static const umn_Token_Kind UMN_K__RESERVED__ = 0xFF0000,
 
 static const umn_Token_Kind UMN_KSTRING = 0x400,
                             UMN_KLITERAL = 0x200,
-                            UMN_KSYMBOL = UMN_KLITERAL | 0x80;
+                            UMN_KSYMBOL = UMN_KLITERAL | 0x80; /* TODO: remove reliance on the fact that ksymbol is also a literal */
 static const umn_Token_Kind UMN_KNUMERIC = 0x100,
                             UMN_KINTEGER = UMN_KNUMERIC | 0x2,
                             UMN_KFRACTION = UMN_KNUMERIC | 0x1;
@@ -112,8 +112,7 @@ static int umn_token_issymbol(const umn_Lexer *lexer, const umn_Token *token, co
 void umn_token_print(const umn_Lexer *lexer, const umn_Token *token);
 void umn_token_print_error(const umn_Lexer *lexer, const umn_Token *token);
 
-// #define UMN_LEXER_IMPL
-#ifdef UMN_LEXER_IMPL
+#ifdef UMN_LEXER_IMPLEMENTATION
 
 static int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token);
 
@@ -340,7 +339,7 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
   /* just statically allocated on the stack a thing */
   const umn_Symbol *symbol;
   const char *symbol_s;
-  int best = -1, best_count = 0;
+  int best = -1, best_count = 0, count = 0;
 
   for (unsigned i = 0; i < lexer->symbols.count; i++)
   {
@@ -349,7 +348,7 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
     if (symbol_s == NULL)
       continue;
 
-    unsigned count = 0;
+    count = 0;
     while (lexer->data[token->begin + count] == symbol_s[count] && symbol_s[count] != '\0')
       count++;
 
@@ -464,7 +463,7 @@ inline int umn_token_issymbol(const umn_Lexer *lexer, const umn_Token *token, co
 
 int umn_token__kind_to_str(const umn_Token *token, char *dest, const size_t size)
 {
-  int n = 0;
+  size_t n = 0;
 
   /* so what this thing does is to return ERR:RESERVER_1:KIND(enc ... ) */
   if (token->kind & UMN_KERR)
@@ -530,10 +529,10 @@ void umn_token_print_error(const umn_Lexer *lexer, const umn_Token *token)
 
   puts(lexer->data + (token->begin - token->line_offset));
 
-  for (int i = 0; i < token->line_offset; i++)
+  for (size_t i = 0; i < token->line_offset; i++)
     putchar(' ');
 
-  for (int i = 0; i < token->length; i++)
+  for (size_t i = 0; i < token->length; i++)
     putchar('^');
 
   putchar('\n');

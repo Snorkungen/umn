@@ -68,6 +68,19 @@ void umn_slab_free_generic(umn_slab_generic_t *slab, void *allocated, size_t ite
 #define umn_slab_free(slab, allocated) umn_slab_free_generic((umn_slab_generic_t *)&(slab), allocated, sizeof((*(*(slab).items).items)))
 #define umn_slab_drop(slab, allocated) umn_slab_drop_generic((umn_slab_generic_t *)&(slab), allocated, sizeof((*(*(slab).items).items)))
 
+void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size);
+void umn_slab_drop_generic(umn_slab_generic_t *slab, void *allocated, size_t item_size);
+
+typedef UMN_SLICE_T(char) umn_sb_t;
+int umn_sb_appends(umn_sb_t *sb, const char *s);
+int umn_sb_appendc(umn_sb_t *sb, const char v);
+
+typedef UMN_SLAB_T(char) umn_arena_t;
+void *umn_arena_alloc(umn_arena_t *arena, size_t size);
+void *umn_arena_alloc(umn_arena_t *arena, size_t size);
+
+#ifdef UMN_UTILS_IMPLEMENTATION
+#undef UMN_UTILS_IMPLEMENTATION
 void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size)
 {
     /* handle base case */
@@ -126,7 +139,7 @@ void umn_slab_drop_generic(umn_slab_generic_t *slab, void *allocated, size_t ite
         i--;
 
     slab->count = i + 1;
-    for (i = slab->count; i < slab->capacity; i++)
+    for (i = slab->count; (size_t)i < slab->capacity; i++)
         umn_slice_at(*slab, i).count = 0;
 }
 
@@ -147,7 +160,6 @@ void umn_slab_free_generic(umn_slab_generic_t *slab, void *allocated, size_t ite
     }
 }
 
-typedef UMN_SLICE_T(char) umn_sb_t;
 int umn_sb_appends(umn_sb_t *sb, const char *s)
 {
     size_t len = strlen(s);
@@ -165,4 +177,30 @@ int umn_sb_appendc(umn_sb_t *sb, const char v)
     return 1;
 }
 
+/* the arena is a special form of the slab allocator .... */
+void *umn_arena_alloc(umn_arena_t *arena, size_t size)
+{
+    static const size_t slab_size = 1024 * 4; /* 4kiB should be enough */
+    void *data;
+
+    /* TODO: align the thing ...  */
+    if (arena->count == 0 || (umn_slice_at((*arena), -1).count + size) >= umn_slice_at((*arena), -1).capacity)
+    {
+        umn_slice_reserve((*arena), 1);
+        arena->count++;
+
+        umn_slice_at((*arena), -1).capacity = slab_size > size ? slab_size : size;
+        umn_slice_at((*arena), -1).items = malloc(umn_slice_at((*arena), -1).capacity);
+    }
+
+    data = umn_slice_at((*arena), -1).items + umn_slice_at((*arena), -1).count;
+    umn_slice_at((*arena), -1).count += size;
+    return data;
+}
+void umn_arena_free(umn_arena_t *arena)
+{
+    return umn_slab_free((*arena), NULL);
+}
+
+#endif
 #endif

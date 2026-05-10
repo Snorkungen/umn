@@ -1,6 +1,8 @@
-/* Snorkungen 2025 umn for the next year */
+/* Snorkungen 2026 umn for the next year */
 
-#define UMN_LEXER_IMPL 1
+#define UMN_LEXER_IMPLEMENTATION
+#define UMN_UTILS_IMPLEMENTATION
+#define UMN_EXPR_IMPLEMENTATION
 #include "umn/expr.h"
 
 typedef enum
