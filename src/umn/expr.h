@@ -492,7 +492,7 @@ umn_PToken *umn_expr_parse_ext(umn_PToken_Allocator *pallocator, umn_Lexer *lexe
     if (token.kind & UMN_KERR)
         return umn_ptoken_alloc(pallocator, &token);
 
-    if (expect_value && stack.count > 0)
+    if (expect_value && stack.count > 1)
     {
         umn_PToken *err_ptoken = umn_ptoken_alloc(pallocator, &token);
         err_ptoken->token.kind = UMN_KPARSE_ERR | UMN_KERR;

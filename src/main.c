@@ -121,6 +121,7 @@ static umn_Symbol umn_notation_symbols[] = {
 
     /* this needs a better way of encoding the the symbol and stuff */
     /* currently the expr parse relies on the fact that the attrs have a precedence which is defined as something */
+    {"~", .flags = UMN_SF_UNARY_L},
     {"<<", .flags = UMN_SF_BINOP, .data = 0x80},
     {">>", .flags = UMN_SF_BINOP, .data = 0x80},
     {"&", .flags = UMN_SF_BINOP, .data = 0x80},
@@ -174,6 +175,10 @@ uint64_t compute_node(const umn_Lexer *lexer, umn_PToken *p, umn_Token *err_toke
             value = lvalue | rvalue;
 
         return value;
+    }
+    else if (p->token.kind & UMN_KUNARY_L && p->rvalue && umn_token_issymbol(lexer, &p->token, "~"))
+    {
+        return ~compute_node(lexer, p->rvalue, err_token);
     }
 
     if (err_token)
