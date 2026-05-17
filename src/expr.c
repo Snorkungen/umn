@@ -65,7 +65,7 @@ void test_1(umn_PToken_Allocator *ptokens, umn_Lexer *lexer)
         lexer->position = 0;
         lexer->data = tests[i].str;
 
-        res = umn_expr_parse(ptokens, lexer);
+        res = umn_expr_parse2(lexer, ptokens, NULL, NULL);
 
         int64_t value = compute(lexer, res);
 
@@ -75,6 +75,7 @@ void test_1(umn_PToken_Allocator *ptokens, umn_Lexer *lexer)
 
         if (value - tests[i].expected)
         {
+            puts(tests[i].str);
             printf("\033[31m");
             umn_ptoken_tree_print(lexer, res);
             printf("\033[0m");
@@ -90,7 +91,9 @@ static const umn_Symbol umn_expr_symbols__[] = {
     {.s = "."},
     {.s = ",", .flags = UMN_SF_BARRR},
     {.s = "("},
-    {.s = ")"},
+    {.s = ")", .flags = UMN_SF_BARRR},
+    {.s = "-", .flags = UMN_SF_UNARY_L},
+    {.s = "!", .flags = UMN_SF_UNARY_R},
     {.s = "=", .flags = UMN_SF_BINOP, .data = 16},
     {.s = "+", .flags = UMN_SF_BINOP | UMN_SF_UNARY_L, .data = 18},
     {.s = "*", .flags = UMN_SF_BINOP, .data = 19},
@@ -100,6 +103,13 @@ static const umn_Lexer_Symbols umn_expr_symbols = {
     .count = ARRAY_LEN(umn_expr_symbols__),
     .items = umn_expr_symbols__,
 };
+
+#define __SET_DATA(__DATA__)   \
+    do                         \
+    {                          \
+        lexer.data = __DATA__; \
+        lexer.position = 0;    \
+    } while (0)
 
 int main(void)
 {
@@ -114,20 +124,29 @@ int main(void)
     test_1(&ptokens, &lexer);
     puts("--------------------------");
     /* parse a function and do things ... */
-    
+
     /* f(x) = 2 * x */
     lexer.position = 0;
     // lexer.data = "f(x,) = 2 * x, f(3)"; /* I want this to compute to 6*/
-    lexer.data = "f(x, y = 2) = x + 1"; /* I want this to compute to 6*/
-    
-    ptoken = umn_expr_parse_ext(&ptokens, &lexer, NULL);
+    lexer.data = "f(x, y = 2) = (x + 1) * -y"; /* I want this to compute to 6*/
+
+    ptoken = umn_expr_parse2(&lexer, &ptokens, NULL, umn_expr_parse__func_value, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
 
     puts("--------------------------");
 
     lexer.position = 0;
     lexer.data = "+10 * +++(1 * 2) = +1 + x, 1 + 1";
-    ptoken = umn_expr_parse(&ptokens, &lexer);
+    ptoken = umn_expr_parse2(&lexer, &ptokens, NULL, NULL);
+    umn_ptoken_tree_print(&lexer, ptoken);
+    umn_ptoken_strncpy(&lexer, ptoken, cbuffer, sizeof(cbuffer));
+    puts(cbuffer);
+
+    puts("--------------------------");
+
+    __SET_DATA("1 + -5!!");
+    
+    ptoken = umn_expr_parse2(&lexer, &ptokens, NULL, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
     umn_ptoken_strncpy(&lexer, ptoken, cbuffer, sizeof(cbuffer));
     puts(cbuffer);
