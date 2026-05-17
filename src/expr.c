@@ -65,7 +65,7 @@ void test_1(umn_PToken_Allocator *ptokens, umn_Lexer *lexer)
         lexer->position = 0;
         lexer->data = tests[i].str;
 
-        res = umn_expr_parse2(lexer, ptokens, NULL, NULL);
+        res = umn_expr_parse(lexer, ptokens, NULL, NULL);
 
         int64_t value = compute(lexer, res);
 
@@ -130,14 +130,14 @@ int main(void)
     // lexer.data = "f(x,) = 2 * x, f(3)"; /* I want this to compute to 6*/
     lexer.data = "f(x, y = 2) = (x + 1) * -y"; /* I want this to compute to 6*/
 
-    ptoken = umn_expr_parse2(&lexer, &ptokens, NULL, umn_expr_parse__func_value, NULL);
+    ptoken = umn_expr_parse(&lexer, &ptokens, NULL, umn_expr_parse__func_value, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
 
     puts("--------------------------");
 
     lexer.position = 0;
     lexer.data = "+10 * +++(1 * 2) = +1 + x, 1 + 1";
-    ptoken = umn_expr_parse2(&lexer, &ptokens, NULL, NULL);
+    ptoken = umn_expr_parse(&lexer, &ptokens, NULL, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
     umn_ptoken_strncpy(&lexer, ptoken, cbuffer, sizeof(cbuffer));
     puts(cbuffer);
@@ -145,8 +145,8 @@ int main(void)
     puts("--------------------------");
 
     __SET_DATA("1 + -5!!");
-    
-    ptoken = umn_expr_parse2(&lexer, &ptokens, NULL, NULL);
+
+    ptoken = umn_expr_parse(&lexer, &ptokens, NULL, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
     umn_ptoken_strncpy(&lexer, ptoken, cbuffer, sizeof(cbuffer));
     puts(cbuffer);

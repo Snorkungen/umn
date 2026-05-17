@@ -203,7 +203,7 @@ int main(int argc, char **argv)
 
     umn_PToken *p;
 
-    while ((p = umn_expr_parse(&ptokens, &config.lexer)))
+    while ((p = umn_expr_parse(&config.lexer, &ptokens, NULL, NULL)))
     {
         if (p->token.kind & UMN_KPARSE_ERR && p->lvalue->token.kind == 0 && p->lvalue->lvalue->token.kind == UMN_KINTEGER)
         {
