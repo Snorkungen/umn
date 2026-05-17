@@ -439,19 +439,14 @@ umn_PToken *umn_expr_parse_ext(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_al
 
     if (ptoken->token.kind == 0)
     {
-        if (ptoken->lvalue)
+        if (ptoken->lvalue == NULL)
         {
-            void *tmp = ptoken->lvalue;
-            (*ptoken) = (*ptoken->lvalue);
-            umn_slab_drop((*ptoken_allocator), tmp); /* does this optimization actually achieve something useful */
-            return ptoken;
-        }
-        else
-        { 
-            /* or should this thing return an error token with no more data left ...*/
             umn_slab_drop((*ptoken_allocator), ptoken);
             return NULL;
         }
+
+        /* LEAKING A PNODE ... */
+        return ptoken->lvalue;
     }
 
     return ptoken;

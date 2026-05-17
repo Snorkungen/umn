@@ -115,9 +115,9 @@ Conf init_conf(int argc, char **argv)
 }
 
 static umn_Symbol umn_notation_symbols[] = {
-    {","},
     {"("},
-    {")"},
+    {")", .flags = UMN_SF_BARRR},
+    {",", .flags = UMN_SF_BARRR},
 
     /* this needs a better way of encoding the the symbol and stuff */
     /* currently the expr parse relies on the fact that the attrs have a precedence which is defined as something */
@@ -143,7 +143,7 @@ void print_bin(uint64_t value)
     } while (j-- != 0);
 }
 
-uint64_t compute_node(const umn_Lexer *lexer, umn_PToken *p, umn_Token *err_token)
+uint64_t compute_node(const umn_Lexer *lexer, const umn_PToken *p, umn_Token *err_token)
 {
     /* TODO: how do i's indicate an error ...*/
     /* could just exfiltrate bya assigning onto som kind of err node */
@@ -198,10 +198,10 @@ int main(int argc, char **argv)
         .count = ARRAY_LEN(umn_notation_symbols),
     };
 
-    UMN_SLICE_T(struct {umn_PToken *p; uint64_t value; })
+    UMN_SLICE_T(struct {const umn_PToken *p; uint64_t value; })
     computed_values = {0};
 
-    umn_PToken *p;
+    const umn_PToken *p;
 
     while ((p = umn_expr_parse(&config.lexer, &ptokens, NULL, NULL)))
     {
