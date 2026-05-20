@@ -199,7 +199,7 @@ void *umn_arena_alloc(umn_arena_t *arena, size_t size)
 }
 void umn_arena_free(umn_arena_t *arena)
 {
-    return umn_slab_free((*arena), NULL);
+    umn_slab_free((*arena), NULL);
 }
 
 #endif
