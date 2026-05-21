@@ -409,10 +409,13 @@ umn_PToken *umn_expr_parse_ext(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_al
         else
         {
             /* handle errors and stuff ... */
-            if (!expect_value && token.flags & UMN_SF_BARRR)
-            {
-                umn_lexer_give(lexer, &token);
-                break;
+            if (umn_slice_at(stack, -1)->rvalue || (umn_slice_at(stack, -1)->lvalue && umn_slice_at(stack, -1)->token.kind == 0))
+            { /* TODO: figure out a better way to exit successfully when the expression has been parsed */
+                if ((token.kind & (UMN_KSYMBOL & ~UMN_KLITERAL)) == 0 || (token.kind == UMN_KSYMBOL && (bool)(token.flags & UMN_SF_BARRR)))
+                {
+                    umn_lexer_give(lexer, &token);
+                    break;
+                }
             }
 
             {
