@@ -464,7 +464,7 @@ umn_PToken *umn_expr_parse__bracket_value(umn_Lexer *lexer, umn_PToken_Allocator
 
     /* NOTE: this function is special thus it is allowed to modify the token */
     if (umn_lexer_next(lexer, (umn_Token *)token) || !umn_token_issymbol(lexer, token, ")"))
-        return NULL;
+        return umn_expr_parse_err_ptoken(lexer, ptoken_allocator, token, ptoken);
 
     return ptoken;
 }
