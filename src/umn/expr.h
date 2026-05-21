@@ -78,6 +78,7 @@ umn_expr_parser_t umn_expr_parse__func_value; /* SHOULD THIS FUNCTIONALITY BE GE
 
 umn_PToken *umn_expr_parse(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_allocator, void *value_parser_data, umn_expr_parser_t *parser, ...);
 umn_PToken *umn_expr_parse_ext(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_allocator, void *value_parser_data, umn_expr_parsers_t value_parsers);
+umn_PToken *umn_expr_parse_err_ptoken(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_allocator, const umn_Token *token, umn_PToken *context);
 
 #ifdef UMN_EXPR_IMPLEMENTATION
 #undef UMN_EXPR_IMPLEMENTATION
@@ -313,7 +314,7 @@ umn_PToken *umn_expr_parse(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_alloca
 umn_PToken *umn_expr_parse_ext(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_allocator, void *value_parser_data, umn_expr_parsers_t value_parsers)
 {
     bool expect_value = true;
-    umn_PToken *ptoken, *err_ptoken;
+    umn_PToken *ptoken;
     umn_Token token;
 
     umn_expr_parse_stack_t stack = {.capacity = ARRAY_LEN(stack.items)};
@@ -418,13 +419,7 @@ umn_PToken *umn_expr_parse_ext(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_al
                 }
             }
 
-            {
-                err_ptoken = umn_ptoken_alloc(ptoken_allocator, &token);
-                err_ptoken->token.kind = UMN_KPARSE_ERR | UMN_KERR;
-                err_ptoken->lvalue = umn_slice_at(stack, -1);
-                err_ptoken->rvalue = umn_ptoken_alloc(ptoken_allocator, &token);
-                return err_ptoken;
-            }
+            return umn_expr_parse_err_ptoken(lexer, ptoken_allocator, &token, umn_slice_at(stack, -1));
         }
 
         expect_value = !expect_value;
@@ -432,9 +427,7 @@ umn_PToken *umn_expr_parse_ext(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_al
 
     if (expect_value || umn_slice_at(stack, -1)->rvalue == NULL)
     {
-        err_ptoken = umn_ptoken_alloc(ptoken_allocator, &token);
-        err_ptoken->token.kind = UMN_KPARSE_ERR | UMN_KERR;
-        err_ptoken->lvalue = umn_slice_at(stack, -1);
+        return umn_expr_parse_err_ptoken(lexer, ptoken_allocator, NULL, umn_slice_at(stack, -1));
     }
 
     umn_expr_parse__fold_stack(&stack);
@@ -533,6 +526,7 @@ umn_PToken *umn_expr_parse__func_value(umn_Lexer *lexer, umn_PToken_Allocator *p
 
         if (value_ptoken->token.kind & (UMN_KERR | UMN_KPARSE_ERR))
         {
+            /* NOTE: I need a way to bubble up the error .. */
             return value_ptoken; /* CONSIDER A BETTER WAY OF DOING THIS :::: */
         }
 
@@ -540,14 +534,7 @@ umn_PToken *umn_expr_parse__func_value(umn_Lexer *lexer, umn_PToken_Allocator *p
         skipped = false;
     }
 
-    /* error_ here ... */
-
-    umn_PToken *err_ptoken = umn_ptoken_alloc(ptoken_allocator, NULL);
-    err_ptoken->token.kind = UMN_KPARSE_ERR | UMN_KERR;
-    err_ptoken->lvalue = ptoken;
-    err_ptoken->rvalue = umn_ptoken_alloc(ptoken_allocator, &token);
-
-    return err_ptoken;
+    return umn_expr_parse_err_ptoken(lexer, ptoken_allocator, NULL, ptoken);
 }
 
 /* @return value */
@@ -572,6 +559,15 @@ inline static void umn_expr_parse__fold_stack(umn_expr_parse_stack_t *stack)
     }
 
     stack->count = 1;
+}
+
+umn_PToken *umn_expr_parse_err_ptoken(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_allocator, const umn_Token *token, umn_PToken *context)
+{
+    umn_PToken *err_ptoken = umn_ptoken_alloc(ptoken_allocator, token);
+    err_ptoken->token.kind |= UMN_KPARSE_ERR | UMN_KERR;
+    err_ptoken->lvalue = context;
+    err_ptoken->rvalue = umn_ptoken_alloc(ptoken_allocator, token);
+    return err_ptoken;
 }
 
 #endif
