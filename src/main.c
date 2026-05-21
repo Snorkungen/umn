@@ -143,19 +143,28 @@ void print_bin(uint64_t value)
     } while (j-- != 0);
 }
 
-uint64_t compute_node(const umn_Lexer *lexer, const umn_PToken *p, umn_Token *err_token)
+/* TODO: support arbitrary precision numbers */
+typedef struct
+{
+    uint64_t value;
+} umn_uint_t;
+
+#define umn_uint_byte_count(__n__) ((((sizeof(__n__) * 8) - __builtin_clzl(__n__ | 1)) + 7) / 8)
+#define umn_uint(__n__) ((umn_uint_t){.value = __n__})
+
+umn_uint_t compute_node(const umn_Lexer *lexer, const umn_PToken *p, umn_Token *err_token)
 {
     /* TODO: how do i's indicate an error ...*/
     /* could just exfiltrate bya assigning onto som kind of err node */
     /* this is ugly but I would pressume it to work */
     if (err_token && err_token->kind)
-        return 0;
+        return umn_uint(0);
 
     assert(p);
 
-    uint64_t value, lvalue, rvalue;
+    umn_uint_t value = {0}, lvalue, rvalue;
     if (p->token.kind == UMN_KINTEGER)
-        return umn_token_readi(lexer, &p->token);
+        return umn_uint(umn_token_readu(lexer, &p->token));
     else if (p->token.kind & UMN_KBINOP && p->lvalue && p->rvalue)
     {
         lvalue = compute_node(lexer, p->lvalue, err_token);
@@ -164,21 +173,34 @@ uint64_t compute_node(const umn_Lexer *lexer, const umn_PToken *p, umn_Token *er
         if (NULL)
             ;
         else if (umn_token_issymbol(lexer, &p->token, "<<"))
-            value = lvalue << rvalue;
+        {
+            lvalue.value <<= rvalue.value;
+        }
         else if (umn_token_issymbol(lexer, &p->token, ">>"))
-            value = lvalue >> rvalue;
+        {
+            lvalue.value >>= rvalue.value;
+        }
         else if (umn_token_issymbol(lexer, &p->token, "&"))
-            value = lvalue & rvalue;
+        {
+            lvalue.value &= rvalue.value;
+        }
         else if (umn_token_issymbol(lexer, &p->token, "^"))
-            value = lvalue ^ rvalue;
+        {
+            lvalue.value ^= rvalue.value;
+        }
         else if (umn_token_issymbol(lexer, &p->token, "|"))
-            value = lvalue | rvalue;
+        {
+            lvalue.value |= rvalue.value;
+        }
 
-        return value;
+        return lvalue;
     }
     else if (p->token.kind & UMN_KUNARY_L && p->rvalue && umn_token_issymbol(lexer, &p->token, "~"))
     {
-        return ~compute_node(lexer, p->rvalue, err_token);
+        value = compute_node(lexer, p->rvalue, err_token);
+        value.value = ~value.value ^ (~0UL << (umn_uint_byte_count(value.value) * 8));
+
+        return value;
     }
 
     if (err_token)
@@ -198,19 +220,13 @@ int main(int argc, char **argv)
         .count = ARRAY_LEN(umn_notation_symbols),
     };
 
-    UMN_SLICE_T(struct {const umn_PToken *p; uint64_t value; })
+    UMN_SLICE_T(struct {const umn_PToken *p; umn_uint_t value; })
     computed_values = {0};
 
     const umn_PToken *p;
 
     while ((p = umn_expr_parse(&config.lexer, &ptokens, NULL, NULL)))
     {
-        if (p->token.kind & UMN_KPARSE_ERR && p->lvalue->token.kind == 0 && p->lvalue->lvalue->token.kind == UMN_KINTEGER)
-        {
-            umn_lexer_give(&config.lexer, &p->rvalue->token);
-            p = p->lvalue->lvalue;
-        }
-
         if (p->token.kind & UMN_KERR)
         {
             puts("failed to read the following value: ");
@@ -238,7 +254,7 @@ int main(int argc, char **argv)
     char buffer[512] = {0};
     for (int i = 0; i < computed_values.count; i++)
     {
-        uint64_t value = umn_slice_at(computed_values, i).value;
+        umn_uint_t value = umn_slice_at(computed_values, i).value;
         p = umn_slice_at(computed_values, i).p;
 
         printf("%s = ", umn_ptoken_strncpy(&config.lexer, p, buffer, sizeof(buffer)));
@@ -257,16 +273,16 @@ int main(int argc, char **argv)
             switch (e)
             {
             case Enc_Bin:
-                print_bin(value);
+                print_bin(value.value);
                 break;
             case Enc_Oct:
-                printf("%#lo", value);
+                printf("%#lo", value.value);
                 break;
             case Enc_Hex:
-                printf("%#lx", value);
+                printf("%#lx", value.value);
                 break;
             case Enc_Dec:
-                printf("%lu", value);
+                printf("%lu", value.value);
                 break;
             default:
                 abort();

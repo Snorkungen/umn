@@ -418,6 +418,24 @@ int64_t umn_token_readi(const umn_Lexer *lexer, const umn_Token *token)
   }
 }
 
+uint64_t umn_token_readu(const umn_Lexer *lexer, const umn_Token *token)
+{
+  char const *s_beg = lexer->data + token->begin;
+  char *s_end = (char *)s_beg + token->length;
+
+  switch (token->encoding)
+  {
+  case umn_Enc_Integer_Binary:
+    return strtoul(s_beg + 2, &s_end, 2);
+  case umn_Enc_Integer_Octal:
+    return strtoul(s_beg, &s_end, 8);
+  case umn_Enc_Integer_Hexadec:
+    return strtoul(s_beg, &s_end, 16);
+  default:
+    return strtoul(s_beg, &s_end, 10);
+  }
+}
+
 double umn_token_readf(const umn_Lexer *lexer, const umn_Token *token)
 {
   char const *s_beg = lexer->data + token->begin;
