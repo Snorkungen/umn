@@ -425,7 +425,11 @@ umn_PToken *umn_expr_parse_ext(umn_Lexer *lexer, umn_PToken_Allocator *ptoken_al
         expect_value = !expect_value;
     }
 
-    if (expect_value || umn_slice_at(stack, -1)->rvalue == NULL)
+    if (stack.count == 1 && umn_slice_at(stack, 0)->lvalue == NULL && umn_slice_at(stack, 0)->token.kind == 0)
+    {
+        return NULL; /* if end of data then just return null */
+    }
+    else if (expect_value || (umn_slice_at(stack, 0)->token.kind & (UMN_KBINOP | UMN_KUNARY_L) && umn_slice_at(stack, -1)->rvalue == NULL))
     {
         return umn_expr_parse_err_ptoken(lexer, ptoken_allocator, NULL, umn_slice_at(stack, -1));
     }
