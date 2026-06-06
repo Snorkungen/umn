@@ -11,8 +11,9 @@
 
 #include "./utils.h"
 
-#include <stdio.h>
-#include <ctype.h>
+#include <stdio.h>  /* printf, puts */
+#include <ctype.h>  /* tolower, toupper, isdigit, isxdigit, isspace */
+#include <string.h> /* strtod, strtol, strtoul, memset, strlen strncmp */
 
 typedef enum
 {
@@ -100,6 +101,7 @@ void umn_token_print(const umn_Lexer *lexer, const umn_Token *token);
 int64_t umn_token_readi(const umn_Lexer *lexer, const umn_Token *token);
 double umn_token_readf(const umn_Lexer *lexer, const umn_Token *token);
 char *umn_token_strncpy(const umn_Lexer *lexer, const umn_Token *token, char *dest, size_t dsize);
+int umn_sb_push_token(umn_sb_t *sb, const umn_Lexer *lexer, const umn_Token *token);
 
 int umn_token_litncmp(const umn_Lexer *lexer, const umn_Token *token, const char *literal, const size_t litsize);
 static int umn_token_litcmp(const umn_Lexer *lexer, const umn_Token *token, const char *literal);
@@ -173,7 +175,7 @@ static inline bool umn_lexer_read_integer(umn_Lexer *lexer, umn_Token *token, wc
   case umn_Enc_Integer_Hexadec:
     return isxdigit(curr);
   case umn_Enc_Integer_Octal:
-    return (curr - '0') <= 7 && isdigit(curr); /* redundant but oh well */
+    return (curr - '0') <= 7;
   case umn_Enc_Integer_Dec:
   default: /* do nothing */
     return isdigit(curr);
@@ -200,9 +202,8 @@ static inline bool umn_lexer_read_fraction(umn_Lexer *lexer, umn_Token *token, w
 
 int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
 {
-
   wchar_t curr;
-  memset(token, 0, sizeof(*token));
+  *token = (umn_Token){0};
 
   lexer->separation_pos = (size_t)-1;
 
@@ -315,8 +316,7 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
 
 inline int umn_lexer_peek(const umn_Lexer *lexer, umn_Token *token)
 {
-  umn_Lexer tmp;
-  memcpy(&tmp, lexer, sizeof(tmp));
+  umn_Lexer tmp = *lexer;
   return umn_lexer_next(&tmp, token);
 }
 
@@ -444,6 +444,11 @@ double umn_token_readf(const umn_Lexer *lexer, const umn_Token *token)
   return strtod(s_beg, &s_end);
 }
 
+int umn_sb_push_token(umn_sb_t *sb, const umn_Lexer *lexer, const umn_Token *token)
+{
+  return umn_sb_pushsn(sb, lexer->data + token->begin, token->length);
+}
+
 char *umn_token_strncpy(const umn_Lexer *lexer, const umn_Token *token, char *dest, size_t dsize)
 {
   if (token->length < dsize)
@@ -481,11 +486,14 @@ inline int umn_token_issymbol(const umn_Lexer *lexer, const umn_Token *token, co
 
 int umn_token__kind_to_str(const umn_Token *token, char *dest, const size_t size)
 {
-  size_t n = 0;
+  umn_sb_t sb = {.capacity = size, .items = dest};
+  int sb_err = 0;
+
+  /* convert to the string builder approach  */
 
   /* so what this thing does is to return ERR:RESERVER_1:KIND(enc ... ) */
   if (token->kind & UMN_KERR)
-    n += snprintf(dest + n, size - n, "ERR:");
+    sb_err = umn_sb_pushs(&sb, "ERR:");
 
   /* TODO: the reserved bits are flags so treat it as such, i.e. multiple hits */
   if (token->kind & UMN_K__RESERVED__)
@@ -496,7 +504,8 @@ int umn_token__kind_to_str(const umn_Token *token, char *dest, const size_t size
     {
       if ((v & (UMN_K__1 << r)))
       {
-        n += snprintf(dest + n, size - n, "R%d:", r + 1);
+        sb_err = umn_sb_pushf(&sb, "R%d:", r + 1);
+        break;
       }
     }
   }
@@ -517,20 +526,18 @@ int umn_token__kind_to_str(const umn_Token *token, char *dest, const size_t size
     kind = "UMN_KSYMBOL";
 
   if (kind)
-    n += snprintf(dest + n, size - n, "%s", kind);
+    sb_err = umn_sb_pushs(&sb, kind);
   else
-    n += snprintf(dest + n, size - n, "unknown(%#lx)", (token->kind & (~UMN_KERR)));
+    sb_err = umn_sb_pushf(&sb, "unknown(%#lx)", (token->kind & (~UMN_KERR)));
 
   if (token->kind & UMN_KNUMERIC && (token->encoding & 0xFF))
-    n += snprintf(dest + n, size - n, "(%c)", (char)(token->encoding & 0xFF));
+    sb_err = umn_sb_pushf(&sb, "(%c)", token->encoding);
 
-  assert(n <= size);
-  dest[n] = '\0';
-
-  return n;
+  assert(sb_err == 0); /* assert that the string builder did not fail and stuff ... */
+  return sb.count;
 }
 
-void umn_token_print(const umn_Lexer *lexer, const umn_Token *token)
+void umn_token_print_(const umn_Lexer *lexer, const umn_Token *token)
 {
   char value[128] = {0}, kind[128] = {0};
   umn_token__kind_to_str(token, kind, sizeof(kind));
@@ -539,6 +546,8 @@ void umn_token_print(const umn_Lexer *lexer, const umn_Token *token)
   printf("umn_Token { %s, .begin=%zu, .length=%d, value=\"%s\"}\n",
          kind, token->begin, token->length, value);
 }
+
+#define umn_token_print(lexer, token) printf("%s:%d", __FILE__, __LINE__), umn_token_print_(lexer, token)
 
 void umn_token_print_error(const umn_Lexer *lexer, const umn_Token *token)
 {

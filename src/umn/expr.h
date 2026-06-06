@@ -3,6 +3,7 @@
 
 #include "utils.h"
 #include "lexer.h"
+#include <stdarg.h> /* va_list, va_start, va_start */
 
 /*
     DEFAULT SYMBOLS TO GET GOING
@@ -83,8 +84,6 @@ umn_PToken *umn_expr_parse_err_ptoken(umn_Lexer *lexer, umn_PToken_Allocator *pt
 #ifdef UMN_EXPR_IMPLEMENTATION
 #undef UMN_EXPR_IMPLEMENTATION
 
-#include <stdarg.h>
-
 static inline bool umn_lexer_peek_token_issymbol(const umn_Lexer *lexer, const char *literal)
 {
     umn_Token token;
@@ -119,9 +118,9 @@ const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken,
         stack_item_t items[64];
     } stack = {.capacity = ARRAY_LEN(stack.items)};
 
-    char buffer[256] = {0};
+    umn_sb_t sb = {.capacity = dsize, .items = dest};
+    int sb_err = 0;
 
-    size_t n = 0;
     stack_item_t item;
 
     umn_slice_push(stack, ((stack_item_t){ptoken}));
@@ -137,26 +136,26 @@ const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken,
             umn_slice_push(stack, ((stack_item_t){ptoken->lvalue}));
 
             if (always_bracket || ptoken->token.kind & UMN_KBRACK)
-                n += snprintf(dest + n, dsize - n, "("); /* avoid directly touching the data */
+                sb_err = umn_sb_pushc(&sb, '(');
         }
         else if (ptoken->token.kind & UMN_KBINOP && item.state == 1) /* untouched */
         {
             umn_slice_push(stack, ((stack_item_t){ptoken, 2}));
             umn_slice_push(stack, ((stack_item_t){ptoken->rvalue}));
 
-            n += snprintf(dest + n, dsize - n, " %s ",
-                          umn_token_strncpy(lexer, &ptoken->token, buffer, sizeof(buffer)));
+            sb_err = umn_sb_pushc(&sb, ' ');
+            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
+            sb_err = umn_sb_pushc(&sb, ' ');
         }
         else if (ptoken->token.kind & UMN_KBINOP && item.state == 2)
         {
             if (always_bracket || ptoken->token.kind & UMN_KBRACK)
-                n += snprintf(dest + n, dsize - n, ")");
+                sb_err = umn_sb_pushc(&sb, ')');
         }
         else if (ptoken->token.kind & UMN_KUNARY_L)
         {
             umn_slice_push(stack, ((stack_item_t){ptoken->rvalue}));
-            n += snprintf(dest + n, dsize - n, "%s",
-                          umn_token_strncpy(lexer, &ptoken->token, buffer, sizeof(buffer)));
+            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
         }
         else if (ptoken->token.kind & UMN_KUNARY_R && item.state == 0)
         {
@@ -165,39 +164,39 @@ const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken,
         }
         else if (ptoken->token.kind & UMN_KUNARY_R && item.state == 1)
         {
-            n += snprintf(dest + n, dsize - n, "%s",
-                          umn_token_strncpy(lexer, &ptoken->token, buffer, sizeof(buffer)));
+            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
         }
         else if (ptoken->token.kind & UMN_KFNC) /* FNC APPLICATIONS will need a different logic */
         {
-            n += snprintf(dest + n, dsize - n, "%s(", umn_token_strncpy(lexer, &ptoken->token, buffer, sizeof(buffer)));
-
-            /* NOTE: what happens when i allow for expressions, I guess not my current problem */
+            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
+            sb_err = umn_sb_pushc(&sb, '(');
 
             for (umn_PToken *child = ptoken->lvalue; child; child = child->rvalue)
-                n += snprintf(dest + n, dsize - n, child->rvalue ? "%s, " : "%s",
-                              umn_token_strncpy(lexer, &child->token, dest + n, dsize - n));
+            {
+                sb_err = umn_sb_push_token(&sb, lexer, &child->token);
+                if (child->rvalue)
+                    sb_err = umn_sb_pushs(&sb, ", ");
+            }
 
-            n += snprintf(dest + n, dsize - n, ")");
+            sb_err = umn_sb_pushc(&sb, ')');
         }
         else if (ptoken->token.kind == UMN_KLITERAL && ptoken->prev)
         {
             for (const umn_PToken *child = ptoken; child; child = child->next)
-                n += snprintf(dest + n, dsize - n, "%s.",
-                              umn_token_strncpy(lexer, &child->token, buffer, sizeof(buffer)));
-            n--; /* remove trailing . */
+            {
+                sb_err = umn_sb_push_token(&sb, lexer, &child->token);
+                sb_err = umn_sb_pushc(&sb, '.');
+            }
+            sb.count--; /* remove trailing '.' */
         }
         else
         {
-            n += snprintf(dest + n, dsize - n, "%s",
-                          umn_token_strncpy(lexer, &ptoken->token, buffer, sizeof(buffer)));
+            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
         }
     }
 
-    /* Add trailing null byte */
-    dest[n < dsize ? n : dsize - 1] = '\0';
-
-    return dest;
+    assert(sb.count < sb.capacity);
+    return sb.items;
 }
 
 void umn_ptoken_tree_print(const umn_Lexer *lexer, const umn_PToken *ptoken)
