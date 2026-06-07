@@ -11,7 +11,7 @@ uint64_t compute(const umn_Lexer *lexer, umn_PToken *root)
         return -1;
 
     if (root->token.kind == UMN_KINTEGER)
-        return umn_token_readi(lexer, &root->token);
+        return umn_token_readu(lexer, &root->token);
 
     int64_t res, lv = compute(lexer, root->lvalue), rv = compute(lexer, root->rvalue);
 

@@ -13,7 +13,7 @@
 
 #include <stdio.h>  /* printf, puts */
 #include <ctype.h>  /* tolower, toupper, isdigit, isxdigit, isspace */
-#include <string.h> /* strtod, strtol, strtoul, memset, strlen strncmp */
+#include <string.h> /* strtod, strncpy, strncmp */
 
 typedef enum
 {
@@ -379,7 +379,7 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
   assert(ARRAY_LEN(cached_lens) > lexer->symbols.count);
 
   for (unsigned i = 0; i < lexer->symbols.count; i++)
-    cached_lens[i] = strlen(lexer->symbols.items[i].s);
+    cached_lens[i] = umn_strlen(lexer->symbols.items[i].s);
 
   for (unsigned i = 1; i < token->length; i++)
   {
@@ -424,18 +424,17 @@ int64_t umn_token_readi(const umn_Lexer *lexer, const umn_Token *token)
 uint64_t umn_token_readu(const umn_Lexer *lexer, const umn_Token *token)
 {
   char const *s_beg = lexer->data + token->begin;
-  char *s_end = (char *)s_beg + token->length;
 
   switch (token->encoding)
   {
   case umn_Enc_Integer_Binary:
-    return strtoul(s_beg + 2, &s_end, 2);
+    return umn_readu(s_beg, token->length, 2);
   case umn_Enc_Integer_Octal:
-    return strtoul(s_beg, &s_end, 8);
+    return umn_readu(s_beg + 1, token->length - 1, 8);
   case umn_Enc_Integer_Hexadec:
-    return strtoul(s_beg, &s_end, 16);
+    return umn_readu(s_beg + 2, token->length - 2, 16);
   default:
-    return strtoul(s_beg, &s_end, 10);
+    return umn_readu(s_beg, token->length, 10);
   }
 }
 
@@ -474,7 +473,7 @@ int umn_token_litncmp(const umn_Lexer *lexer, const umn_Token *token, const char
 
 inline int umn_token_litcmp(const umn_Lexer *lexer, const umn_Token *token, const char *literal)
 {
-  return umn_token_litncmp(lexer, token, literal, strlen(literal));
+  return umn_token_litncmp(lexer, token, literal, umn_strlen(literal));
 }
 
 inline int umn_token_is(const umn_Lexer *lexer, const umn_Token *a, const umn_Token *b)

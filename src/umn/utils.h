@@ -8,9 +8,10 @@
 
 #include <stdio.h>  /* printf */
 #include <stdlib.h> /* abort, free, malloc, realloc */
-#include <string.h> /* memcpy, strlen, memset, strtoul */
+#include <string.h> /* memcpy, strlen, strtoul */
 
 #define umn_strlen(__str__) strlen(__str__)
+// #define umn_strlen(__str__) __builtin_constant_p(__str__) ? (sizeof(__str__) - 1) : strlen(__str__)
 
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
@@ -24,6 +25,8 @@
 #define umn_isbdigit(c) (((unsigned)(c) - '0') <= 1)                                /* is a binary digit 0 or 1*/
 #define umn_isodigit(c) (((unsigned)(c) - '0') <= 7)                                /* is an octal digit 0 - 7 */
 #define umn_isxdigit(c) (umn_isdigit(c) || ((unsigned)c | 32) - 'a' <= ('f' - 'a')) /* is a hexadecimal digit */
+
+static void *umn_memset(void *__s, int __c, size_t __n);
 
 #define UMN_TODO(msg)                                         \
     do                                                        \
@@ -120,12 +123,15 @@ int umn_sb_pushf(umn_sb_t *sb, const char *format, ...) __attribute__((format(pr
 
 */
 
+unsigned long umn_readu(const char *s, size_t n, int base); /* decode string to number */
+
 typedef UMN_SLAB_T(char) umn_arena_t;
 void *umn_arena_alloc(umn_arena_t *arena, size_t size);
 void *umn_arena_alloc(umn_arena_t *arena, size_t size);
 
-#ifdef UMN_UTILS_IMPLEMENTATION
+#ifdef UMN_UTILS_IMPLEMENTATION /* UMN_UTILS_IMPLEMENTATION */
 #undef UMN_UTILS_IMPLEMENTATION
+
 void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size)
 {
     /* handle base case */
@@ -136,7 +142,7 @@ void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size)
         size_t begin_cap = slab->capacity;
         umn_slice_reserve((*slab), 0);
         /* initialize the items */
-        memset(slab->items + begin_cap, 0, sizeof(*slab->items) * (slab->capacity - begin_cap));
+        umn_memset(slab->items + begin_cap, 0, sizeof(*slab->items) * (slab->capacity - begin_cap));
 
         if (slab->items == NULL)
             return NULL;
@@ -156,7 +162,7 @@ void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size)
     umn_slice_at((*slab), -1).count++;
 
     void *alllocation = (&((char *)umn_slice_at((*slab), -1).items)[(umn_slice_at((*slab), -1).count - 1) * item_size]);
-    memset(alllocation, 0, item_size);
+    umn_memset(alllocation, 0, item_size);
 
     return alllocation;
 }
@@ -307,7 +313,7 @@ static inline const char *umn_format__int_or_star(const char *s, int *result)
 
     if (end > s)
     {
-        *result = strtoul(s, &end, 10);
+        *result = umn_readu(s, (end - s), 10);
         return end;
     }
 
@@ -663,6 +669,47 @@ int umn_sb_pushf(umn_sb_t *sb, const char *format, ...)
     return 0;
 }
 
+unsigned long umn_readu(const char *s, size_t n, int base)
+{
+    const char *end = s + n;
+    unsigned long result = 0, tmp;
+
+    if (n > 2)
+    {
+        if ((*(s + 1) | 32) == 'b')
+            base = 2, s += 2;
+        else if ((*(s + 1) | 32) == 'x')
+            base = 16, s += 2;
+    }
+    else if (n > 1 && *s == '0' && umn_isodigit(*(s + 1)))
+        base = 8, s += 1;
+
+    switch ((unsigned)base & 0xFF)
+    {
+    case 2:
+        for (; s < end; s++)
+            result = (result << 1) | ((unsigned)*s - '0');
+        break;
+    case 8:
+        for (; s < end; s++)
+            result = (result << 3) | ((unsigned)*s - '0');
+        break;
+    case 16:
+        for (; s < end; s++)
+        {
+            tmp = ((unsigned)*s - '0'), tmp = tmp <= 9 ? tmp : 10 + (((unsigned)*s | 32) - 'a');
+            result = (result << 4) | tmp;
+        }
+        break;
+    case 10:
+    default:
+        for (; s < end; s++)
+            result = (result * 10) + ((unsigned)*s - '0');
+    }
+
+    return result;
+}
+
 /* the arena is a special form of the slab allocator .... */
 void *umn_arena_alloc(umn_arena_t *arena, size_t size)
 {
@@ -705,6 +752,11 @@ void umn_free(umn_allocator_t *allocator, void *allocation)
 {
     (void)allocator, (void)allocation;
     free(allocation);
+}
+
+static inline void *umn_memset(void *__s, int __c, size_t __n)
+{
+    return __builtin_memset(__s, __c, __n);
 }
 
 #endif

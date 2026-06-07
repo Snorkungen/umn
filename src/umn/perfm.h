@@ -37,7 +37,7 @@ static struct
     /* here i can shove other things in the future */
 } umn_perfm_ctx = {0};
 
-#define umn_perfm_reset(t) memset(&t->avg, 0, sizeof(t->avg))
+#define umn_perfm_reset(t) umn_memset(&t->avg, 0, sizeof(t->avg))
 
 umn_perfm_t *umn_perfm_create(void)
 {
@@ -48,7 +48,7 @@ umn_perfm_t *umn_perfm_create(void)
 umn_perfm_t *umn_perfm_create_new(umn_perfm_t *parent, const char *name)
 {
     umn_perfm_t *t = umn_slab_alloc(umn_perfm_ctx);
-    memset(t, 0, sizeof(*t));
+    umn_memset(t, 0, sizeof(*t));
 
     if (name)
         t->data.name = name;
