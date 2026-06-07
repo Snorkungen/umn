@@ -43,10 +43,7 @@ Conf init_conf(int argc, char **argv)
     sb.items[0] = '\0';
 
     for (int i = 1; i < argc; i++)
-    {
-        umn_sb_appendc(&sb, ' ');
-        umn_sb_appends(&sb, argv[i]);
-    }
+        umn_sb_pushc(&sb, ' '), umn_sb_pushs(&sb, argv[i]);
 
     umn_Token token;
     static umn_Symbol symbols[] = {{"-"}, {"--"}}; /* What's the syntax */

@@ -20,7 +20,10 @@
 #define UMN_ASSERT(expr) assert(expr)
 
 /* umn_ctypes */
-#define umn_isdigit(c) ((unsigned)(c) - '0' < 10)
+#define umn_isdigit(c) (((unsigned)(c) - '0') < 10)                                 /* is a digit 0 - 9 */
+#define umn_isbdigit(c) (((unsigned)(c) - '0') <= 1)                                /* is a binary digit 0 or 1*/
+#define umn_isodigit(c) (((unsigned)(c) - '0') <= 7)                                /* is an octal digit 0 - 7 */
+#define umn_isxdigit(c) (umn_isdigit(c) || ((unsigned)c | 32) - 'a' <= ('f' - 'a')) /* is a hexadecimal digit */
 
 #define UMN_TODO(msg)                                         \
     do                                                        \

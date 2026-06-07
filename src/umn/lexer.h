@@ -118,8 +118,8 @@ void umn_token_print_error(const umn_Lexer *lexer, const umn_Token *token);
 
 static int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token);
 
-wchar_t umn_lexer_decode_utf8(umn_Lexer *lexer);
-inline wchar_t umn_lexer_decode_utf8(umn_Lexer *lexer)
+static wchar_t umn_lexer_decode_utf8(umn_Lexer *lexer);
+static inline wchar_t umn_lexer_decode_utf8(umn_Lexer *lexer)
 {
   if (lexer->data[lexer->position] & 0x80)
     UMN_TODO("Actually support decoding of utf8");
@@ -142,8 +142,11 @@ static inline bool umn_lexer_read_integer(umn_Lexer *lexer, umn_Token *token, wc
   if (token->begin == (lexer->position - 1) && lexer->data[token->begin] == '0')
   {
     /* attempt to read the thing ... */
-    if (curr - '0' <= 7 && isdigit(curr))
+    if (umn_isodigit(curr))
+    {
       token->encoding = umn_Enc_Integer_Octal;
+      return true; /* Octal, does not have a separation char */
+    }
     else if (tolower(curr) == umn_Enc_Integer_Binary)
       token->encoding = umn_Enc_Integer_Binary;
     else if (tolower(curr) == umn_Enc_Integer_Hexadec)
@@ -171,14 +174,14 @@ static inline bool umn_lexer_read_integer(umn_Lexer *lexer, umn_Token *token, wc
   switch (token->encoding)
   {
   case umn_Enc_Integer_Binary:
-    return (curr - '0') <= 1;
-  case umn_Enc_Integer_Hexadec:
-    return isxdigit(curr);
+    return umn_isbdigit(curr);
   case umn_Enc_Integer_Octal:
-    return (curr - '0') <= 7;
+    return umn_isodigit(curr);
+  case umn_Enc_Integer_Hexadec:
+    return umn_isxdigit(curr);
   case umn_Enc_Integer_Dec:
   default: /* do nothing */
-    return isdigit(curr);
+    return umn_isdigit(curr);
   }
 }
 
