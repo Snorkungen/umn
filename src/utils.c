@@ -7,7 +7,7 @@ int main(void)
 {
     umn_sb_t sb = {0};
     sb.capacity = 128 << 4;
-    sb.items = malloc(sb.capacity);
+    sb.items = umn_malloc(NULL, sb.capacity);
     memset(sb.items, 'X', sb.capacity);
 
     const char *s = "Hello";

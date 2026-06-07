@@ -29,38 +29,40 @@
     do                                                        \
     {                                                         \
         printf("%s:%d: TODO(%s)\n", __FILE__, __LINE__, msg); \
-        abort();                                              \
+        exit(EXIT_FAILURE);                                   \
     } while (0)
+
+/* for now this is just a placeholder */
+typedef struct umn_allocator_t
+{
+    struct umn_allocator_t *allocator;
+} umn_allocator_t;
+
+void *umn_malloc(umn_allocator_t *allocator, size_t size);
+void *umn_realloc(umn_allocator_t *allocator, void *allocation, size_t size);
+void umn_free(umn_allocator_t *allocator, void *allocation);
 
 /* The fundamental data structure is what i'm calling a slice */
-#define UMN_SLICE_T(Type)       \
-    struct                      \
-    {                           \
-        size_t count, capacity; \
-        Type *items;            \
+#define UMN_SLICE_T(Type)           \
+    struct                          \
+    {                               \
+        umn_allocator_t *allocator; \
+        size_t count, capacity;     \
+        Type *items;                \
     }
 
-/* NOTE: must check items seperately */
-#define umn_slice_ensure(slice)                                                                       \
-    do                                                                                                \
-    {                                                                                                 \
-        if ((slice).count >= (slice).capacity)                                                        \
-        {                                                                                             \
-            (slice).capacity = ((((slice).capacity + (slice).count - (slice).capacity) * 2) + 7) / 8; \
-            (slice).items = realloc((slice).items, (slice).capacity * sizeof(*(slice).items));        \
-            UMN_ASSERT((slice).items);                                                                \
-        }                                                                                             \
+#define umn_slice_reserve(slice, __amount)                                                                          \
+    do                                                                                                              \
+    {                                                                                                               \
+        if (((slice).count + (__amount)) >= (slice).capacity)                                                       \
+        {                                                                                                           \
+            (slice).capacity = ((slice).capacity + ((slice).count + (__amount)) - (slice).capacity) * 2;            \
+            (slice).capacity += (slice).capacity % 8;                                                               \
+            (slice).items = umn_realloc(slice.allocator, (slice).items, (slice).capacity * sizeof(*(slice).items)); \
+        }                                                                                                           \
     } while (0)
 
-#define umn_slice_reserve(slice, __amount)                                                     \
-    do                                                                                         \
-    {                                                                                          \
-        if (((slice).count + (__amount)) >= (slice).capacity)                                  \
-        {                                                                                      \
-            (slice).capacity = ((slice).capacity + (__amount) + 1) * 2;                        \
-            (slice).items = realloc((slice).items, (slice).capacity * sizeof(*(slice).items)); \
-        }                                                                                      \
-    } while (0)
+#define umn_slice_ensure(slice) umn_slice_reserve(slice, 0)
 
 /* returns the value pushed */
 #define umn_slice_push(slice, v) \
@@ -76,11 +78,17 @@
 
 /* Experiment with the slab allocator thingy ... */
 /* An implementation of a slab allocator which is just essentially a slice of slices ... */
-#define UMN_SLAB_T(Type)           \
-    struct                         \
-    {                              \
-        size_t count, capacity;    \
-        UMN_SLICE_T(Type) * items; \
+/* TODO: this should be an allocator */
+#define UMN_SLAB_T(Type)            \
+    struct                          \
+    {                               \
+        umn_allocator_t *allocator; \
+        size_t count, capacity;     \
+        struct                      \
+        {                           \
+            size_t count, capacity; \
+            Type *items;            \
+        } *items;                   \
     }
 
 #define UMN_SLAB_SIZE 128 /* just for the vibes just allocate 128 items because why not */
@@ -98,28 +106,6 @@ void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size);
 void umn_slab_drop_generic(umn_slab_generic_t *slab, void *allocated, size_t item_size);
 
 /* String Builder */
-
-typedef struct
-{
-    size_t kind;
-
-    /* kind = 0*/
-    const char *s;
-    size_t length;
-
-    /* kind = 1 */
-    int width, precision;
-    int modifier, conversion;
-    char flag;
-    bool width_set, precision_set;
-} umn_format_command_t;
-
-typedef struct
-{
-    size_t count, capacity;
-    umn_format_command_t items[32];
-} umn_format_commands_t;
-
 typedef UMN_SLICE_T(char) umn_sb_t;
 int umn_sb_pushc(umn_sb_t *sb, char c);                     /* push a single char */
 int umn_sb_pushcc(umn_sb_t *sb, char c, size_t count);      /* push a given char n times */
@@ -160,7 +146,7 @@ void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size)
         {
             umn_slice_at((*slab), -1).count = 0;
             umn_slice_at((*slab), -1).capacity = UMN_SLAB_SIZE;
-            umn_slice_at((*slab), -1).items = malloc(umn_slice_at((*slab), -1).capacity * item_size);
+            umn_slice_at((*slab), -1).items = umn_malloc(slab->allocator, umn_slice_at((*slab), -1).capacity * item_size);
         }
 
         if (umn_slice_at((*slab), -1).items == NULL)
@@ -208,16 +194,39 @@ void umn_slab_free_generic(umn_slab_generic_t *slab, void *allocated, size_t ite
     umn_slab_drop_generic(slab, allocated, item_size);
 
     for (unsigned i = slab->count; i < slab->capacity; i++)
-        free(slab->items[i].items);
+        umn_free(slab->allocator, slab->items[i].items);
 
-    memset(slab->items + slab->count, 0, sizeof(*slab->items) * (slab->capacity - slab->count));
+    umn_memset(slab->items + slab->count, 0, sizeof(*slab->items) * (slab->capacity - slab->count));
 
     if (slab->count == 0)
     {
-        free(slab->items);
-        memset(slab, 0, sizeof(*slab));
+        umn_free(slab->allocator, slab->items);
+        umn_memset(slab, 0, sizeof(*slab));
     }
 }
+
+/* --- UMN SB ---*/
+
+typedef struct
+{
+    size_t kind;
+
+    /* kind = 0*/
+    const char *s;
+    size_t length;
+
+    /* kind = 1 */
+    int width, precision;
+    int modifier, conversion;
+    char flag;
+    bool width_set, precision_set;
+} umn_format_command_t;
+
+typedef struct
+{
+    size_t count, capacity;
+    umn_format_command_t items[32];
+} umn_format_commands_t;
 
 static inline char umn_format__flag(char c)
 {
@@ -387,7 +396,7 @@ int umn_sb_pushsn(umn_sb_t *sb, const char *s, size_t len)
 
 inline int umn_sb_pushs(umn_sb_t *sb, const char *s)
 {
-    return umn_sb_pushsn(sb, s, strlen(s));
+    return umn_sb_pushsn(sb, s, umn_strlen(s));
 }
 
 int umn_sb_pushc(umn_sb_t *sb, char v)
@@ -667,16 +676,35 @@ void *umn_arena_alloc(umn_arena_t *arena, size_t size)
         arena->count++;
 
         umn_slice_at((*arena), -1).capacity = slab_size > size ? slab_size : size;
-        umn_slice_at((*arena), -1).items = malloc(umn_slice_at((*arena), -1).capacity);
+        umn_slice_at((*arena), -1).items = umn_malloc(arena->allocator, umn_slice_at((*arena), -1).capacity);
     }
 
     data = umn_slice_at((*arena), -1).items + umn_slice_at((*arena), -1).count;
     umn_slice_at((*arena), -1).count += size;
     return data;
 }
+
 void umn_arena_free(umn_arena_t *arena)
 {
     umn_slab_free((*arena), NULL);
+}
+
+void *umn_malloc(umn_allocator_t *allocator, size_t size)
+{
+    (void)allocator;
+    return malloc(size);
+}
+
+void *umn_realloc(umn_allocator_t *allocator, void *allocation, size_t size)
+{
+    (void)allocator;
+    return realloc(allocation, size);
+}
+
+void umn_free(umn_allocator_t *allocator, void *allocation)
+{
+    (void)allocator, (void)allocation;
+    free(allocation);
 }
 
 #endif

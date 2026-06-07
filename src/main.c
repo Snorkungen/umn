@@ -206,6 +206,9 @@ int main(int argc, char **argv)
     UMN_SLICE_T(struct {const umn_PToken *p; umn_uint_t value; })
     computed_values = {0};
 
+    char buffer[512];
+    umn_sb_t sb = {.capacity = sizeof(buffer), .items = buffer};
+
     const umn_PToken *p;
 
     while ((p = umn_expr_parse(&config.lexer, &ptokens, NULL, NULL)))
@@ -234,8 +237,6 @@ int main(int argc, char **argv)
     }
 
     /* iterate over the thing an print the values S*/
-    char buffer[512];
-    umn_sb_t sb = {.capacity = sizeof(buffer), .items = buffer};
 
     const char *format[] = {
         [Enc_Bin] = "%#lb",
@@ -272,9 +273,8 @@ int main(int argc, char **argv)
 
     umn_slab_free(ptokens, ptokens.items ? ptokens.items->items : NULL);
 
-    /* free the computed values slice */
-    free((char *)config.lexer.data);
-    free(computed_values.items);
+    umn_free(NULL, (char *)config.lexer.data);
+    umn_free(NULL, computed_values.items);
 
     return 0;
 }
