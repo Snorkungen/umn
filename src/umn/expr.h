@@ -55,6 +55,8 @@ umn_PToken *umn_ptoken_alloc(umn_PToken_Allocator *allocator, const umn_Token *t
 const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken, char *dest, size_t dsize);
 void umn_ptoken_tree_print(const umn_Lexer *lexer, const umn_PToken *ptoken);
 
+int umn_sb_push_ptoken(umn_sb_t *sb, const umn_Lexer *lexer, const umn_PToken *ptoken);
+
 /* Append to a linked list of ptokens */
 static umn_PToken *umn_ptoken_ll_append(umn_PToken *ll, umn_PToken *ptoken);
 
@@ -104,7 +106,7 @@ umn_PToken *umn_ptoken_alloc(umn_PToken_Allocator *allocator, const umn_Token *t
     return ptoken;
 }
 
-const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken, char *dest, size_t dsize)
+int umn_sb_push_ptoken(umn_sb_t *sb, const umn_Lexer *lexer, const umn_PToken *ptoken)
 {
     static const bool always_bracket = false | true;
     typedef struct
@@ -118,16 +120,12 @@ const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken,
         stack_item_t items[64];
     } stack = {.capacity = ARRAY_LEN(stack.items)};
 
-    umn_sb_t sb = {.capacity = dsize, .items = dest};
-    int sb_err = 0;
-
-    stack_item_t item;
-
     umn_slice_push(stack, ((stack_item_t){ptoken}));
+    int sb_err = 0;
 
     while (stack.count)
     {
-        item = umn_slice_pop(stack);
+        stack_item_t item = umn_slice_pop(stack);
         ptoken = item.ptoken;
 
         if (ptoken->token.kind & UMN_KBINOP && item.state == 0) /* untouched */
@@ -136,26 +134,26 @@ const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken,
             umn_slice_push(stack, ((stack_item_t){ptoken->lvalue}));
 
             if (always_bracket || ptoken->token.kind & UMN_KBRACK)
-                sb_err = umn_sb_pushc(&sb, '(');
+                sb_err = umn_sb_pushc(sb, '(');
         }
         else if (ptoken->token.kind & UMN_KBINOP && item.state == 1) /* untouched */
         {
             umn_slice_push(stack, ((stack_item_t){ptoken, 2}));
             umn_slice_push(stack, ((stack_item_t){ptoken->rvalue}));
 
-            sb_err = umn_sb_pushc(&sb, ' ');
-            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
-            sb_err = umn_sb_pushc(&sb, ' ');
+            sb_err = umn_sb_pushc(sb, ' ');
+            sb_err = umn_sb_push_token(sb, lexer, &ptoken->token);
+            sb_err = umn_sb_pushc(sb, ' ');
         }
         else if (ptoken->token.kind & UMN_KBINOP && item.state == 2)
         {
             if (always_bracket || ptoken->token.kind & UMN_KBRACK)
-                sb_err = umn_sb_pushc(&sb, ')');
+                sb_err = umn_sb_pushc(sb, ')');
         }
         else if (ptoken->token.kind & UMN_KUNARY_L)
         {
             umn_slice_push(stack, ((stack_item_t){ptoken->rvalue}));
-            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
+            sb_err = umn_sb_push_token(sb, lexer, &ptoken->token);
         }
         else if (ptoken->token.kind & UMN_KUNARY_R && item.state == 0)
         {
@@ -164,38 +162,44 @@ const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken,
         }
         else if (ptoken->token.kind & UMN_KUNARY_R && item.state == 1)
         {
-            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
+            sb_err = umn_sb_push_token(sb, lexer, &ptoken->token);
         }
         else if (ptoken->token.kind & UMN_KFNC) /* FNC APPLICATIONS will need a different logic */
         {
-            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
-            sb_err = umn_sb_pushc(&sb, '(');
+            sb_err = umn_sb_push_token(sb, lexer, &ptoken->token);
+            sb_err = umn_sb_pushc(sb, '(');
 
             for (umn_PToken *child = ptoken->lvalue; child; child = child->rvalue)
             {
-                sb_err = umn_sb_push_token(&sb, lexer, &child->token);
+                sb_err = umn_sb_push_token(sb, lexer, &child->token);
                 if (child->rvalue)
-                    sb_err = umn_sb_pushs(&sb, ", ");
+                    sb_err = umn_sb_pushs(sb, ", ");
             }
 
-            sb_err = umn_sb_pushc(&sb, ')');
+            sb_err = umn_sb_pushc(sb, ')');
         }
         else if (ptoken->token.kind == UMN_KLITERAL && ptoken->prev)
         {
             for (const umn_PToken *child = ptoken; child; child = child->next)
             {
-                sb_err = umn_sb_push_token(&sb, lexer, &child->token);
-                sb_err = umn_sb_pushc(&sb, '.');
+                sb_err = umn_sb_push_token(sb, lexer, &child->token);
+                sb_err = umn_sb_pushc(sb, '.');
             }
-            sb.count--; /* remove trailing '.' */
+            sb->items[--sb->count] = '\0'; /* remove trailing '.' */
         }
         else
         {
-            sb_err = umn_sb_push_token(&sb, lexer, &ptoken->token);
+            sb_err = umn_sb_push_token(sb, lexer, &ptoken->token);
         }
     }
 
-    assert(sb.count < sb.capacity);
+    return sb_err;
+}
+
+const char *umn_ptoken_strncpy(const umn_Lexer *lexer, const umn_PToken *ptoken, char *dest, size_t dsize)
+{
+    umn_sb_t sb = {.capacity = dsize, .items = dest};
+    UMN_ASSERT(umn_sb_push_ptoken(&sb, lexer, ptoken) == 0);
     return sb.items;
 }
 

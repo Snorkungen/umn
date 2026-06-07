@@ -128,6 +128,12 @@ int umn_sb_pushs(umn_sb_t *sb, const char *s);              /* push a string */
 int umn_sb_pushu(umn_sb_t *sb, unsigned long v, int enc);   /* string encode a number */
 int umn_sb_pushf(umn_sb_t *sb, const char *format, ...) __attribute__((format(printf, 2, 3)));
 
+/*
+
+    while (umn_sb_grow(arena, sb, umn_sb_pushs(sb, "Hello, E, Jon"))) {};
+
+*/
+
 typedef UMN_SLAB_T(char) umn_arena_t;
 void *umn_arena_alloc(umn_arena_t *arena, size_t size);
 void *umn_arena_alloc(umn_arena_t *arena, size_t size);
@@ -379,7 +385,7 @@ int umn_sb_pushsn(umn_sb_t *sb, const char *s, size_t len)
     return 0;
 }
 
-int umn_sb_pushs(umn_sb_t *sb, const char *s)
+inline int umn_sb_pushs(umn_sb_t *sb, const char *s)
 {
     return umn_sb_pushsn(sb, s, strlen(s));
 }
@@ -434,7 +440,6 @@ int umn_sb_pushu(umn_sb_t *sb, unsigned long v, int enc)
         break;
 
     case 16:
-
         for (; v; v >>= 4)
             *(--s) = hex_values[(v & 0XF)] | to_lower;
         break;

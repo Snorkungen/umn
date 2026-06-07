@@ -126,20 +126,6 @@ static umn_Symbol umn_notation_symbols[] = {
     {"|", .flags = UMN_SF_BINOP, .data = 0x80},
 };
 
-void print_bin(uint64_t value)
-{
-    uint64_t n = value;
-    unsigned int j = 0;
-    while (n >>= 1)
-        j++;
-
-    printf("0b");
-    do
-    {
-        putchar(((value & (1UL << j)) > 0) + '0');
-    } while (j-- != 0);
-}
-
 /* TODO: support arbitrary precision numbers */
 typedef struct
 {
@@ -248,13 +234,24 @@ int main(int argc, char **argv)
     }
 
     /* iterate over the thing an print the values S*/
-    char buffer[512] = {0};
+    char buffer[512];
+    umn_sb_t sb = {.capacity = sizeof(buffer), .items = buffer};
+
+    const char *format[] = {
+        [Enc_Bin] = "%#lb",
+        [Enc_Oct] = "%#lo",
+        [Enc_Hex] = "%#lx",
+        [Enc_Dec] = "%lu",
+    };
+
     for (int i = 0; i < computed_values.count; i++)
     {
+        sb.count = 0;
         umn_uint_t value = umn_slice_at(computed_values, i).value;
         p = umn_slice_at(computed_values, i).p;
 
-        printf("%s = ", umn_ptoken_strncpy(&config.lexer, p, buffer, sizeof(buffer)));
+        umn_sb_push_ptoken(&sb, &config.lexer, p),
+            umn_sb_pushs(&sb, " = ");
 
         bool touched = false;
         for (Enc e = 0; e < Enc_Last; e++)
@@ -263,29 +260,14 @@ int main(int argc, char **argv)
                 continue;
 
             if (touched)
-                printf(", ");
+                umn_sb_pushs(&sb, ", ");
             else
                 touched = true;
 
-            switch (e)
-            {
-            case Enc_Bin:
-                print_bin(value.value);
-                break;
-            case Enc_Oct:
-                printf("%#lo", value.value);
-                break;
-            case Enc_Hex:
-                printf("%#lx", value.value);
-                break;
-            case Enc_Dec:
-                printf("%lu", value.value);
-                break;
-            default:
-                abort();
-            }
+            umn_sb_pushf(&sb, format[e], value.value);
         }
-        putchar('\n');
+
+        puts(sb.items);
     }
 
     umn_slab_free(ptokens, ptokens.items ? ptokens.items->items : NULL);

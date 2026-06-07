@@ -5,7 +5,8 @@ NAME=$1
 shift 1
 
 CC=clang
-CFLAGS=(--std=c99 -pedantic -Werror -O0)
+CFLAGS="--std=c99 -pedantic -Werror -Wextra -Wall -O0"
+CFLAGS="--std=c99 -pedantic -Werror -O0"
 
 $CC $CFLAGS -ggdb -S -o "./.tmp/$NAME.s" ./src/$NAME.c
 $CC $CFLAGS -ggdb -o "./.tmp/$NAME" ./src/$NAME.c
