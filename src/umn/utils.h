@@ -1,39 +1,22 @@
 #ifndef UMN_UTILS_H
 #define UMN_UTILS_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
-#include <stdarg.h>
-
-#include <stdio.h>  /* printf */
-#include <stdlib.h> /* abort, free, malloc, realloc */
-#include <string.h> /* memcpy, strlen, strtoul */
-
-#define umn_strlen(__str__) strlen(__str__)
-// #define umn_strlen(__str__) __builtin_constant_p(__str__) ? (sizeof(__str__) - 1) : strlen(__str__)
+#define UMN_CORE_IMPLEMENTATION
+#include "./core.h"
 
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
 
 /* Utilities for umn */
 
-#include <assert.h> /* assert */
-#define UMN_ASSERT(expr) assert(expr)
 
-/* umn_ctypes */
-#define umn_isdigit(c) (((unsigned)(c) - '0') < 10)                                 /* is a digit 0 - 9 */
-#define umn_isbdigit(c) (((unsigned)(c) - '0') <= 1)                                /* is a binary digit 0 or 1*/
-#define umn_isodigit(c) (((unsigned)(c) - '0') <= 7)                                /* is an octal digit 0 - 7 */
-#define umn_isxdigit(c) (umn_isdigit(c) || ((unsigned)c | 32) - 'a' <= ('f' - 'a')) /* is a hexadecimal digit */
 
-static void *umn_memset(void *__s, int __c, size_t __n);
+#define umn_assert(expr) ((expr) ? (void)0 : umn_panic("assert failed", __FILE__, __LINE__))
 
-#define UMN_TODO(msg)                                         \
-    do                                                        \
-    {                                                         \
-        printf("%s:%d: TODO(%s)\n", __FILE__, __LINE__, msg); \
-        exit(EXIT_FAILURE);                                   \
-    } while (0)
+#define UMN_TODO(msg)                                     \
+    do                                                    \
+    {                                                     \
+        umn_panic("TODO(" msg ")\n", __FILE__, __LINE__); \
+    } while (0) //  printf("%s:%d: TODO(%s)\n", __FILE__, __LINE__, msg);
 
 /* for now this is just a placeholder */
 typedef struct umn_allocator_t
@@ -69,10 +52,10 @@ void umn_free(umn_allocator_t *allocator, void *allocation);
 
 /* returns the value pushed */
 #define umn_slice_push(slice, v) \
-    ((slice).items[UMN_ASSERT((slice).count < (slice).capacity), (slice).count++] = (v))
+    ((slice).items[umn_assert((slice).count < (slice).capacity), (slice).count++] = (v))
 /* returns the value removed */
 #define umn_slice_pop(slice) \
-    (slice).items[UMN_ASSERT((slice).count > 0), --(slice).count]
+    (slice).items[umn_assert((slice).count > 0), --(slice).count]
 /* returns the value at the index */
 #define umn_slice_at(slice, idx) \
     (slice).items[(slice).count * ((idx) < 0) + (idx)]
@@ -124,6 +107,7 @@ int umn_sb_pushf(umn_sb_t *sb, const char *format, ...) __attribute__((format(pr
 */
 
 unsigned long umn_readu(const char *s, size_t n, int base); /* decode string to number */
+double umn_readd(const char *s, size_t n);                  /* decode string to double */
 
 typedef UMN_SLAB_T(char) umn_arena_t;
 void *umn_arena_alloc(umn_arena_t *arena, size_t size);
@@ -142,6 +126,7 @@ void *umn_slab_alloc_generic(umn_slab_generic_t *slab, size_t item_size)
         size_t begin_cap = slab->capacity;
         umn_slice_reserve((*slab), 0);
         /* initialize the items */
+        umn_assert((*slab).items);
         umn_memset(slab->items + begin_cap, 0, sizeof(*slab->items) * (slab->capacity - begin_cap));
 
         if (slab->items == NULL)
@@ -394,7 +379,7 @@ int umn_sb_pushsn(umn_sb_t *sb, const char *s, size_t len)
     if ((sb->count + 1) > sb->capacity)
         return (sb->count + 1) - sb->capacity;
 
-    memcpy(sb->items + base, s, len);
+    umn_memcpy(sb->items + base, s, len);
 
     sb->items[sb->count] = '\0';
     return 0;
@@ -555,7 +540,7 @@ int umn_sb_pushf(umn_sb_t *sb, const char *format, ...)
             umn_sb_pushc(sb, '%');
         else if (command.conversion == 'c')
         {
-            UMN_ASSERT(command.modifier != 'l');
+            umn_assert(command.modifier != 'l');
 
             /* prepend */
             if ((size_t)command.width > 1 && command.flag != '-')
@@ -568,7 +553,7 @@ int umn_sb_pushf(umn_sb_t *sb, const char *format, ...)
         }
         else if (command.conversion == 's')
         {
-            UMN_ASSERT(command.modifier != 'l');
+            umn_assert(command.modifier != 'l');
 
             const char *p = va_arg(args, const char *);
             size_t len = command.precision ? command.precision : umn_strlen(p);
@@ -636,7 +621,7 @@ int umn_sb_pushf(umn_sb_t *sb, const char *format, ...)
                 break;
 
             default:
-                printf("AAGH %c\n", command.modifier);
+                // printf("AAGH %c\n", command.modifier);
                 UMN_TODO("handle conversion");
             }
 
@@ -710,6 +695,11 @@ unsigned long umn_readu(const char *s, size_t n, int base)
     return result;
 }
 
+double umn_readd(const char *s, size_t n)
+{
+    char *endptr = (char *)s + n;
+    return umn_strtod(s, &endptr);
+}
 /* the arena is a special form of the slab allocator .... */
 void *umn_arena_alloc(umn_arena_t *arena, size_t size)
 {
@@ -739,24 +729,19 @@ void umn_arena_free(umn_arena_t *arena)
 void *umn_malloc(umn_allocator_t *allocator, size_t size)
 {
     (void)allocator;
-    return malloc(size);
+    return NULL;
 }
 
 void *umn_realloc(umn_allocator_t *allocator, void *allocation, size_t size)
 {
     (void)allocator;
-    return realloc(allocation, size);
+    return NULL;
 }
 
 void umn_free(umn_allocator_t *allocator, void *allocation)
 {
     (void)allocator, (void)allocation;
-    free(allocation);
-}
-
-static inline void *umn_memset(void *__s, int __c, size_t __n)
-{
-    return __builtin_memset(__s, __c, __n);
+    NULL;
 }
 
 #endif

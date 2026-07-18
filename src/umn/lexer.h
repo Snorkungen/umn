@@ -11,9 +11,7 @@
 
 #include "./utils.h"
 
-#include <stdio.h>  /* printf, puts */
-#include <ctype.h>  /* tolower, toupper, isdigit, isxdigit, isspace */
-#include <string.h> /* strtod, strncpy, strncmp */
+#include <stdio.h> /* printf, puts */
 
 typedef enum
 {
@@ -147,9 +145,9 @@ static inline bool umn_lexer_read_integer(umn_Lexer *lexer, umn_Token *token, wc
       token->encoding = umn_Enc_Integer_Octal;
       return true; /* Octal, does not have a separation char */
     }
-    else if (tolower(curr) == umn_Enc_Integer_Binary)
+    else if (umn_tolower(curr) == umn_Enc_Integer_Binary)
       token->encoding = umn_Enc_Integer_Binary;
-    else if (tolower(curr) == umn_Enc_Integer_Hexadec)
+    else if (umn_tolower(curr) == umn_Enc_Integer_Hexadec)
       token->encoding = umn_Enc_Integer_Hexadec;
     else
     {
@@ -188,7 +186,7 @@ static inline bool umn_lexer_read_integer(umn_Lexer *lexer, umn_Token *token, wc
 static bool umn_lexer_read_fraction(umn_Lexer *lexer, umn_Token *token, wchar_t curr);
 static inline bool umn_lexer_read_fraction(umn_Lexer *lexer, umn_Token *token, wchar_t curr)
 {
-  if (toupper(curr) == umn_Enc_Fraction_E)
+  if (umn_toupper(curr) == umn_Enc_Fraction_E)
   {
     token->encoding = umn_Enc_Fraction_E;
     lexer->separation_pos = lexer->position;
@@ -200,7 +198,7 @@ static inline bool umn_lexer_read_fraction(umn_Lexer *lexer, umn_Token *token, w
     return true;
   }
 
-  return isdigit(curr);
+  return umn_isdigit(curr);
 }
 
 int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
@@ -211,7 +209,7 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
   lexer->separation_pos = (size_t)-1;
 
   /* before we begin skip whitespace */
-  while (lexer->data[lexer->position] != '\0' && ((curr = lexer->data[lexer->position]) <= ' ' || isspace(curr)))
+  while (lexer->data[lexer->position] != '\0' && ((curr = lexer->data[lexer->position]) <= ' ' || umn_isspace(curr)))
   {
     lexer->position++;
     if (curr == '\n')
@@ -228,11 +226,11 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
   /* Read first char */
   curr = umn_lexer_decode_utf8(lexer);
 
-  assert(token->kind == 0);
+  umn_assert(token->kind == 0);
   /* init token */
   token->begin = lexer->position;
   token->line_offset = lexer->position - lexer->line_begin;
-  token->kind = isdigit(curr) ? UMN_KINTEGER : UMN_KLITERAL;
+  token->kind = umn_isdigit(curr) ? UMN_KINTEGER : UMN_KLITERAL;
 
   if (curr == umn_Enc_String_1 || curr == umn_Enc_String_2)
   {
@@ -251,7 +249,7 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
       b = true;
     }
 
-    if (b || isspace(curr))
+    if (b || umn_isspace(curr))
       break;
 
     lexer->position = lexer->next_position;
@@ -309,7 +307,7 @@ int umn_lexer_next(umn_Lexer *lexer, umn_Token *token)
     return -1;
   }
 
-  assert(token->length > 0);
+  umn_assert(token->length > 0);
 
   if (UMN_KLITERAL == token->kind)
     return umn_lexer__match_symbol(lexer, token); /* tc */
@@ -376,7 +374,7 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
   }
 
   static uint32_t cached_lens[UMN_SYMBOLS_MAX_COUNT];
-  assert(ARRAY_LEN(cached_lens) > lexer->symbols.count);
+  umn_assert(ARRAY_LEN(cached_lens) > lexer->symbols.count);
 
   for (unsigned i = 0; i < lexer->symbols.count; i++)
     cached_lens[i] = umn_strlen(lexer->symbols.items[i].s);
@@ -389,7 +387,7 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
       symbol = lexer->symbols.items + j;
 
       if (((token->length - i) >= cached_lens[j]) /* symbol must fit into the remaining token */ &&
-          strncmp(&lexer->data[token->begin + i], symbol->s, cached_lens[j]) == 0)
+          umn_strncmp(&lexer->data[token->begin + i], symbol->s, cached_lens[j]) == 0)
       {
         /* we's found something quit */
         token->length = i;
@@ -401,24 +399,6 @@ static inline int umn_lexer__match_symbol(umn_Lexer *lexer, umn_Token *token)
   }
 
   return 0;
-}
-
-int64_t umn_token_readi(const umn_Lexer *lexer, const umn_Token *token)
-{
-  char const *s_beg = lexer->data + token->begin;
-  char *s_end = (char *)s_beg + token->length;
-
-  switch (token->encoding)
-  {
-  case umn_Enc_Integer_Binary:
-    return strtol(s_beg + 2, &s_end, 2);
-  case umn_Enc_Integer_Octal:
-    return strtol(s_beg, &s_end, 8);
-  case umn_Enc_Integer_Hexadec:
-    return strtol(s_beg, &s_end, 16);
-  default:
-    return strtol(s_beg, &s_end, 10);
-  }
 }
 
 uint64_t umn_token_readu(const umn_Lexer *lexer, const umn_Token *token)
@@ -440,10 +420,7 @@ uint64_t umn_token_readu(const umn_Lexer *lexer, const umn_Token *token)
 
 double umn_token_readf(const umn_Lexer *lexer, const umn_Token *token)
 {
-  char const *s_beg = lexer->data + token->begin;
-  char *s_end = (char *)s_beg + token->length;
-
-  return strtod(s_beg, &s_end);
+  return umn_readd(lexer->data + token->begin, token->length);
 }
 
 int umn_sb_push_token(umn_sb_t *sb, const umn_Lexer *lexer, const umn_Token *token)
@@ -461,13 +438,13 @@ char *umn_token_strncpy(const umn_Lexer *lexer, const umn_Token *token, char *de
   else
     return NULL;
 
-  return strncpy(dest, lexer->data + token->begin, dsize);
+  return umn_strncpy(dest, lexer->data + token->begin, dsize);
 }
 
 int umn_token_litncmp(const umn_Lexer *lexer, const umn_Token *token, const char *literal, const size_t litsize)
 {
   if (litsize == token->length)
-    return strncmp(lexer->data + token->begin, literal, token->length);
+    return umn_strncmp(lexer->data + token->begin, literal, token->length);
   return -1;
 }
 
@@ -535,7 +512,7 @@ int umn_token__kind_to_str(const umn_Token *token, char *dest, const size_t size
   if (token->kind & UMN_KNUMERIC && (token->encoding & 0xFF))
     sb_err = umn_sb_pushf(&sb, "(%c)", token->encoding);
 
-  assert(sb_err == 0); /* assert that the string builder did not fail and stuff ... */
+  umn_assert(sb_err == 0); /* umn_assert that the string builder did not fail and stuff ... */
   return sb.count;
 }
 
@@ -543,7 +520,7 @@ void umn_token_print_(const umn_Lexer *lexer, const umn_Token *token)
 {
   char value[128] = {0}, kind[128] = {0};
   umn_token__kind_to_str(token, kind, sizeof(kind));
-  strncpy(value, lexer->data + token->begin, token->length);
+  umn_strncpy(value, lexer->data + token->begin, token->length);
 
   printf("umn_Token { %s, .begin=%zu, .length=%d, value=\"%s\"}\n",
          kind, token->begin, token->length, value);
@@ -554,7 +531,7 @@ void umn_token_print_(const umn_Lexer *lexer, const umn_Token *token)
 void umn_token_print_error(const umn_Lexer *lexer, const umn_Token *token)
 {
   char buffer[512] = {0};
-  assert(sizeof(buffer) > ((token->begin - token->line_offset) + token->length));
+  umn_assert(sizeof(buffer) > ((token->begin - token->line_offset) + token->length));
 
   puts(lexer->data + (token->begin - token->line_offset));
 

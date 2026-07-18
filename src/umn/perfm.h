@@ -2,8 +2,6 @@
 #define UMN_PERFM_H
 
 #include "utils.h"
-#include <stdint.h>
-#include <stdio.h>
 
 #ifdef __x86_64__
 #include <x86intrin.h>
@@ -42,12 +40,14 @@ static struct
 umn_perfm_t *umn_perfm_create(void)
 {
     umn_perfm_t *t = umn_slab_alloc(umn_perfm_ctx);
+    umn_assert(t);
     umn_perfm_reset(t);
     return t;
 }
 umn_perfm_t *umn_perfm_create_new(umn_perfm_t *parent, const char *name)
 {
     umn_perfm_t *t = umn_slab_alloc(umn_perfm_ctx);
+    umn_assert(t);
     umn_memset(t, 0, sizeof(*t));
 
     if (name)
