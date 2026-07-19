@@ -7,10 +7,27 @@
 #include <stdarg.h>
 
 #ifndef UMN_DEF
-#define UMN_DEF
+#define UMN_DEF static
 #endif
 
+#define ARRAY_LEN(arr) (sizeof(arr) / sizeof(arr[0]))
+
+#define umn_assert(expr) ((expr) ? (void)0 : umn_panic("assert failed", __FILE__, __LINE__))
+
+#define UMN_TODO(msg)                                     \
+    do                                                    \
+    {                                                     \
+        umn_panic("TODO(" msg ")\n", __FILE__, __LINE__); \
+    } while (0) //  printf("%s:%d: TODO(%s)\n", __FILE__, __LINE__, msg);
+
+/* TODO: Move the sb, and sb_format logic to the core since some core function should leverage the string, builder.
+            What I think is that will probably happen is I move all the utils logic into the core file for consistency */
+
 __attribute__((noreturn)) UMN_DEF void umn_panic(const char *message, const char *file, int line);
+
+/* building blocks */
+static void umn_write_to_stdout(const char *message, const char *file, int line);
+static void umn_write_to_stderr(const char *message, const char *file, int line);
 
 UMN_DEF void *umn_memcpy(void *restrict dst, const void *restrict src, size_t n);
 UMN_DEF void *umn_memmove(void *dst, const void *src, size_t n);
@@ -23,10 +40,6 @@ UMN_DEF char *umn_strncpy(char *dst, const char *src, size_t n);
 UMN_DEF double umn_strtod(const char *nptr, char **endptr);
 UMN_DEF long umn_strtol(const char *nptr, char **endptr, int base);
 
-/* building blocks */
-static void umn_write_to_stdout(const char *message, const char *file, int line);
-static void umn_write_to_stderr(const char *message, const char *file, int line);
-
 /* ctypes is a project */
 UMN_DEF int umn_isdigit(int c);  /* is a digit 0 - 9 */
 UMN_DEF int umn_isbdigit(int c); /* is a binary digit 0 or 1*/
@@ -38,6 +51,28 @@ UMN_DEF int umn_islower(int c);
 UMN_DEF int umn_toupper(int c);
 UMN_DEF int umn_tolower(int c);
 
+/* UMN SLICE MACROS -- BEGIN */
+
+/* returns the value pushed */
+#define umn_slice_push(slice, v) \
+    ((slice).items[umn_assert((slice).count < (slice).capacity), (slice).count++] = (v))
+/* returns the value removed */
+#define umn_slice_pop(slice) \
+    (slice).items[umn_assert((slice).count > 0), --(slice).count]
+/* returns the value at the index */
+#define umn_slice_at(slice, idx) \
+    (slice).items[(slice).count * ((idx) < 0) + (idx)]
+#define umn_slice_last(slice) \
+    (slice).items[(slice).count - 1]
+
+/* UMN SLICE MACROS -- END */
+
+/* UMNs global allocator, strategy, allow for a stack only program, if I wanted */
+UMN_DEF void umn_meminit(void *buffer, size_t size);
+UMN_DEF void *umn_memalloc(size_t size);
+UMN_DEF void *umn_memrealloc(void *ptr, size_t size);
+UMN_DEF void umn_memfree(void *ptr);
+
 #ifdef UMN_CORE_IMPLEMENTATION
 #ifndef UMN_CORE_NOLIBC
 
@@ -45,7 +80,7 @@ UMN_DEF int umn_tolower(int c);
 #include <stdlib.h>
 #include <string.h>
 
-__attribute__((noreturn)) UMN_DEF void umn_panic(const char *message, const char *file, int line)
+UMN_DEF void umn_panic(const char *message, const char *file, int line)
 {
     fprintf(stderr, "panic: %s:%d %s\n", file, line, message);
     abort();
@@ -238,6 +273,8 @@ UMN_DEF inline int umn_memcmp(const void *s1, const void *s2, size_t n)
     return memcmp(s1, s2, n);
 }
 
+/* UMN CTYPES -- BEGIN */
+
 UMN_DEF inline int umn_isspace(int c)
 {
     return (c == ' ' || c == '\t' ||
@@ -265,6 +302,70 @@ UMN_DEF inline int umn_toupper(int c)
         return c & 0xdf;
     return c;
 }
+
+/* UMN CTYPES -- END */
+
+/* UMN MISC -- BEGIN */
+
+/* UMN MISC -- END */
+
+/* UMN MEM -- BEGIN */
+
+#define UMN_MEMBSIZE 64 /* This is memory allocators block size */
+
+static struct
+{
+    size_t offset;
+    uint8_t *data, *head, *data_end;
+} umn__mem = {0};
+
+UMN_DEF void umn_meminit(void *buffer, size_t size)
+{
+    umn_assert(umn__mem.data == NULL && umn__mem.data_end == NULL);
+
+    umn__mem.offset = 0;
+
+    umn__mem.data = umn__mem.head = buffer;
+    umn__mem.data_end = buffer + size;
+}
+
+UMN_DEF void umn_memfree(void *ptr)
+{
+    if (((size_t)umn__mem.head - (size_t)ptr) > umn__mem.offset)
+        return;
+
+    umn__mem.head -= umn__mem.offset;
+    umn__mem.offset = 0;
+}
+
+UMN_DEF void *umn_memalloc(size_t size)
+{
+    size = ((size + 7) >> 3) << 3; /* ((size + 7) / 8) * 8; */
+    size += sizeof(size_t);        /* account for the allocation size and stuff ... */
+
+    umn__mem.offset = size;
+    umn__mem.head += size;
+
+    memset((void *)(umn__mem.head - size), 0, size);
+    *(size_t *)(umn__mem.head - size) = size - sizeof(size_t);
+    return (void *)(umn__mem.head - (size - sizeof(size_t)));
+}
+
+UMN_DEF void *umn_memrealloc(void *ptr, size_t size)
+{
+    umn_memfree(ptr);
+
+    void *data = umn_memalloc(size);
+
+    if (data == ptr)
+        return ptr;
+
+    memcpy(data, ptr, *((size_t *)ptr - 1));
+
+    return data;
+}
+
+/* UMN MEM -- END */
 
 #endif /* UMN_CORE_IMPLEMENTATION */
 #endif /* UMN_CORE_H */
