@@ -343,6 +343,9 @@ UMN_DEF void *umn_memalloc(size_t size)
     size = ((size + 7) >> 3) << 3; /* ((size + 7) / 8) * 8; */
     size += sizeof(size_t);        /* account for the allocation size and stuff ... */
 
+    if (umn__mem.data_end < (umn__mem.head + size))
+        return NULL;
+
     umn__mem.offset = size;
     umn__mem.head += size;
 
@@ -353,16 +356,43 @@ UMN_DEF void *umn_memalloc(size_t size)
 
 UMN_DEF void *umn_memrealloc(void *ptr, size_t size)
 {
-    umn_memfree(ptr);
+    if (ptr == NULL)
+        return NULL;
 
-    void *data = umn_memalloc(size);
+    size = ((size + 7) >> 3) << 3; /* ((size + 7) / 8) * 8; */
+    size += sizeof(size_t);        /* account for the allocation size and stuff ... */
+    
+    if (((size_t)umn__mem.head - (size_t)ptr) > umn__mem.offset)
+    {
+        void *data = umn_memalloc(size);
+        if ((data) == NULL)
+            return NULL;
 
-    if (data == ptr)
+        memcpy(data, ptr, *((size_t *)ptr - 1) - sizeof(size_t));
+        return data;
+    }
+    else if (size < *((size_t *)ptr - 1))
+    {
+        *((size_t *)ptr - 1) = size;
         return ptr;
+    }
+    else
+    {
+        size_t old_size = *((size_t *)ptr - 1), diff = size - old_size;
 
-    memcpy(data, ptr, *((size_t *)ptr - 1));
+        if (umn__mem.head + diff > umn__mem.data_end)
+            return NULL;
 
-    return data;
+        memset(umn__mem.head, 0, diff);
+        umn__mem.head += diff;
+        umn__mem.offset += diff;
+
+        *((size_t *)ptr - 1) = size;
+
+        return ptr;
+    }
+
+    return NULL;
 }
 
 /* UMN MEM -- END */
