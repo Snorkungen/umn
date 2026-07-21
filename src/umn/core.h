@@ -53,6 +53,13 @@ UMN_DEF int umn_tolower(int c);
 
 /* UMN SLICE MACROS -- BEGIN */
 
+#define UMN_SLICE_T(Type)       \
+    struct                      \
+    {                           \
+        size_t count, capacity; \
+        Type *items;            \
+    }
+
 /* returns the value pushed */
 #define umn_slice_push(slice, v) \
     ((slice).items[umn_assert((slice).count < (slice).capacity), (slice).count++] = (v))
@@ -73,7 +80,46 @@ UMN_DEF void *umn_memalloc(size_t size);
 UMN_DEF void *umn_memrealloc(void *ptr, size_t size);
 UMN_DEF void umn_memfree(void *ptr);
 
+/* UMN SB & FORMAT -- BEGIN */
+
+typedef struct
+{
+    size_t kind;
+
+    /* kind = 0*/
+    const char *s;
+    size_t length;
+
+    /* kind = 1 */
+    int width, precision;
+    int modifier, conversion;
+    char flag;
+    bool width_set, precision_set;
+} umn_format_t;
+
+UMN_DEF const char *umn_format_get(const char *fmt, umn_format_t *command);
+
+typedef UMN_SLICE_T(char) umn_sb_t;
+UMN_DEF int umn_sb_pushc(umn_sb_t *sb, char c);                                   /* push a single char */
+UMN_DEF int umn_sb_pushcn(umn_sb_t *sb, char c, size_t count);                    /* push a given char n times */
+UMN_DEF int umn_sb_pushsn(umn_sb_t *sb, const char *s, size_t len);               /* push a string up to n*/
+UMN_DEF int umn_sb_pushs(umn_sb_t *sb, const char *s);                            /* push a string */
+UMN_DEF int umn_sb_pushu(umn_sb_t *sb, unsigned long v, int enc);                 /* string encode a number */
+UMN_DEF int umn_sb_push_format(umn_sb_t *sb, umn_format_t command, va_list args); /* push a format command */
+UMN_DEF int umn_sb_pushf(umn_sb_t *sb, const char *format, ...) __attribute__((format(printf, 2, 3)));
+
+/*
+
+    while (umn_sb_grow(arena, sb, umn_sb_pushs(sb, "Hello, E, Jon"))) {};
+
+*/
+
+// UMN_DEF int umn_sb_pushf(umn_sb_t *sb, const char *format, ...) __attribute__((format(printf, 2, 3)));
+
+/* UMN SB & FORMAT -- END */
+
 #ifdef UMN_CORE_IMPLEMENTATION
+
 #ifndef UMN_CORE_NOLIBC
 
 #include <stdio.h>
@@ -361,7 +407,7 @@ UMN_DEF void *umn_memrealloc(void *ptr, size_t size)
 
     size = ((size + 7) >> 3) << 3; /* ((size + 7) / 8) * 8; */
     size += sizeof(size_t);        /* account for the allocation size and stuff ... */
-    
+
     if (((size_t)umn__mem.head - (size_t)ptr) > umn__mem.offset)
     {
         void *data = umn_memalloc(size);
@@ -396,6 +442,391 @@ UMN_DEF void *umn_memrealloc(void *ptr, size_t size)
 }
 
 /* UMN MEM -- END */
+
+/* UMN SB & FORMAT -- BEGIN */
+
+/* https://en.cppreference.com/c/io/fprintf */
+UMN_DEF const char *umn_format_get(const char *fmt, umn_format_t *command)
+{
+    if (fmt == NULL || *fmt == '\0')
+        return NULL;
+
+    if (*fmt != '%')
+    {
+        command->kind = 0;
+        command->s = fmt;
+
+        do
+        {
+            fmt++;
+        } while (fmt != '\0' && fmt != '%');
+
+        command->length = (size_t)(fmt - command->s);
+
+        return fmt;
+    }
+
+    if (*(fmt + 1) == '%')
+    {
+        command->kind = 0;
+        command->s = fmt;
+        command->length = 1;
+
+        return fmt + 2;
+    }
+
+    memset(command, 0, sizeof(umn_format_t));
+
+    const char *tmp, *s = fmt + 1;
+    command->kind = 1;
+
+    if ((command->flag = umn_format__flag(*s)))
+        s++;
+
+    if ((tmp = umn_format__int_or_star(s, &command->width)))
+        s = tmp, command->width_set = 1;
+
+    if (*s == '.')
+    {
+        s++;
+        if ((tmp = umn_format__int_or_star(s, &command->precision)))
+            s = tmp, command->precision_set = 1;
+    }
+
+    if ((tmp = umn_format__modifier(s, &command->modifier)))
+        s = tmp;
+
+    if (!(command->conversion = umn_format__conversion(*s)))
+    { /* failed, recover by treating this a regular string */
+
+        command->kind = 0;
+        command->s = fmt;
+        command->length = s - fmt;
+    }
+
+    return s + 1;
+}
+
+static inline char umn_format__flag(char c)
+{
+    switch (c)
+    {
+    case '0':
+    case '+':
+    case '-':
+    case ' ':
+    case '#':
+        return c;
+    default:
+        return '\0';
+    }
+}
+
+static inline char umn_format__conversion(char c)
+{
+    switch (c)
+    {
+    case '%':
+    case 'c':
+    case 's':
+    case 'd':
+    case 'i':
+    case 'B':
+    case 'b':
+    case 'o':
+    case 'X':
+    case 'x':
+    case 'u':
+    case 'F':
+    case 'f':
+    case 'E':
+    case 'e':
+    case 'A':
+    case 'a':
+    case 'G':
+    case 'g':
+    case 'n':
+    case 'p':
+        return c;
+    default:
+        return '\0';
+    }
+}
+
+static inline const char *umn_format__modifier(const char *s, int *result)
+{
+    switch (*s)
+    {
+    case 'h':
+    case 'l':
+        if (*s == *(s + 1))
+            s++;
+    case 'j':
+    case 't':
+    case 'z':
+    case 'L':
+        *result = (*s) * (*s == *(s - 1) ? -1 : 1);
+        return s + 1;
+    }
+
+    return NULL;
+}
+
+static inline const char *umn_format__int_or_star(const char *s, int *result)
+{
+    if (*s == '*')
+    {
+        *result = -1;
+        return s + 1;
+    }
+
+    char *end = (char *)s;
+    while (umn_isdigit(*end))
+        end++;
+
+    if (end > s)
+    {
+        *result = umn_readu(s, (end - s), 10);
+        return end;
+    }
+
+    return NULL;
+}
+
+UMN_DEF int umn_sb_push_format(umn_sb_t *sb, umn_format_t command, va_list args)
+{
+    if (command.kind == 0)
+        return umn_sb_pushsn(sb, command.s, command.length);
+
+    if (command.width < 0)
+        command.width = va_arg(args, int);
+    if (command.precision < 0)
+        command.precision = va_arg(args, int);
+
+    int overflow = 0;
+    char sign_char;
+    uintmax_t v;
+    umn_sb_t value_sb = {0}, prefix_sb = {0};
+    char value_buffer[sizeof(uintmax_t) * 8], prefix_buffer[8]; /* account for prefix */
+    value_sb.capacity = sizeof(value_buffer), value_sb.items = value_buffer;
+    prefix_sb.capacity = sizeof(prefix_buffer), prefix_sb.items = prefix_buffer;
+
+    if (command.modifier == 'c')
+    {
+        umn_assert(command.modifier != 'l');
+
+        /* prepend */
+        if ((size_t)command.width > 1 && command.flag != '-')
+            overflow += umn_sb_pushcc(sb, ' ', command.width - 1);
+
+        overflow += umn_sb_pushc(sb, (char)(va_arg(args, int)));
+
+        /* append */
+        if ((size_t)command.width > 1 && command.flag == '-')
+            overflow += umn_sb_pushcc(sb, ' ', command.width - 1);
+    }
+    else if (command.conversion == 's')
+    {
+        umn_assert(command.modifier != 'l');
+
+        const char *p = va_arg(args, const char *);
+        size_t len = command.precision ? command.precision : umn_strlen(p);
+
+        /* prepend */
+        if ((size_t)command.width > len && command.flag != '-')
+            overflow += umn_sb_pushcc(sb, ' ', command.width - len);
+
+        overflow += umn_sb_pushsn(sb, p, len);
+
+        /* append */
+        if ((size_t)command.width > len && command.flag == '-')
+            overflow += umn_sb_pushcc(sb, ' ', command.width - len);
+    }
+    else
+    {
+        value_sb.count = prefix_sb.count = sign_char = 0;
+        if (command.conversion == 'i' || command.conversion == 'd')
+        {
+            intmax_t tv = umn_sb_pushf__signed(command.modifier, va_arg(args, intmax_t));
+
+            if (tv < 0)
+                v = tv * -1, sign_char = '-';
+            else
+                v = tv;
+
+            command.conversion = 'u';
+        }
+        else
+            v = umn_sb_pushf__unsigned(command.modifier, va_arg(args, uintmax_t));
+
+        if (command.precision_set && command.precision == 0 && v == 0)
+            return 0; /* skip this value */
+        else if (command.precision_set == 0)
+            command.precision = 1;
+
+        switch (command.conversion)
+        {
+        case 'o':
+            if (command.flag == '#' && v)
+                umn_sb_pushc(&prefix_sb, '0');
+            umn_sb_pushu(&value_sb, v, 8);
+            break;
+
+        case 'b':
+        case 'B':
+            if (command.flag == '#' && v)
+                umn_sb_pushc(&prefix_sb, '0'), umn_sb_pushc(&prefix_sb, (char)command.conversion);
+            umn_sb_pushu(&value_sb, v, 2);
+            break;
+
+        case 'x':
+        case 'X':
+            if (command.flag == '#' && v)
+                umn_sb_pushc(&prefix_sb, '0'), umn_sb_pushc(&prefix_sb, (char)command.conversion);
+            umn_sb_pushu(&value_sb, v, 16 | ((command.conversion == 'X') << 8));
+            break;
+
+        case 'u':
+            if ((!sign_char && command.flag == ' ') || command.flag == '+')
+                sign_char = '+';
+            if (sign_char)
+                umn_sb_pushc(&prefix_sb, sign_char);
+            umn_sb_pushu(&value_sb, v, 10);
+            break;
+
+        default:
+            UMN_TODO("TODO: handle unhandled conversion");
+        }
+
+        size_t width = prefix_sb.count + (((size_t)command.precision > value_sb.count) ? command.precision : value_sb.count);
+
+        /* prepend */
+        if ((size_t)command.width > width && command.flag != '-')
+            overflow += umn_sb_pushcc(sb, ' ', command.width - width);
+
+        overflow += umn_sb_pushsn(sb, prefix_sb.items, prefix_sb.count);
+
+        /* pad out the numeric value ... */
+        if (value_sb.count < (size_t)command.precision)
+            overflow += umn_sb_pushcc(sb, '0', command.precision - value_sb.count);
+
+        overflow += umn_sb_pushsn(sb, value_sb.items, value_sb.count);
+
+        /* append */
+        if ((size_t)command.width > width && command.flag == '-')
+            overflow += umn_sb_pushcc(sb, ' ', command.width - width);
+    }
+
+    return overflow;
+}
+
+UMN_DEF int umn_sb_pushcn(umn_sb_t *sb, char c, size_t __count)
+{
+    size_t count = sb->count + __count;
+    if ((count + 1) > sb->capacity)
+        return (count + 1) - sb->capacity;
+
+    while (sb->count < count)
+        sb->items[sb->count++] = c;
+
+    sb->items[sb->count] = '\0';
+
+    return 0;
+}
+
+UMN_DEF inline int umn_sb_pushc(umn_sb_t *sb, char c)
+{
+    return umn_sb_pushcn(sb, c, 1);
+}
+
+UMN_DEF int umn_sb_pushsn(umn_sb_t *sb, const char *s, size_t len)
+{
+    size_t base = sb->count;
+
+    sb->count += len;
+    if ((sb->count + 1) > sb->capacity)
+        return (sb->count + 1) - sb->capacity;
+
+    umn_memcpy(sb->items + base, s, len);
+
+    sb->items[sb->count] = '\0';
+    return 0;
+}
+
+UMN_DEF inline inline int umn_sb_pushs(umn_sb_t *sb, const char *s)
+{
+    return umn_sb_pushsn(sb, s, umn_strlen(s));
+}
+
+UMN_DEF int umn_sb_pushu(umn_sb_t *sb, unsigned long v, int enc)
+{
+    size_t count, base = sb->count;
+
+    /* +1 one to prevent overflow for binary thing ... */
+    char internal_buffer[(sizeof(v) + 1) * 8] = {0};
+    char *s = internal_buffer + sizeof(internal_buffer);
+
+    static const char hex_values[] = "0123456789ABCDEF";
+    char to_lower = enc >> 8 > 0 ? 0 : 32;
+
+    switch (enc & 0XFF)
+    {
+    case 2:
+        for (; v; v >>= 1)
+            *(--s) = '0' + (v & 0x1);
+        break;
+
+    case 8:
+        for (; v; v >>= 3)
+            *(--s) = '0' + (v & 0x7);
+        break;
+
+    case 16:
+        for (; v; v >>= 4)
+            *(--s) = hex_values[(v & 0XF)] | to_lower;
+        break;
+
+    default:
+        for (; v; v /= 10)
+            *(--s) = '0' + (v % 10);
+    }
+
+    /* compute the count */
+    count = base + (sizeof(internal_buffer) - (s - internal_buffer));
+
+    if (count == base) /* hack for doing the thing ... */
+        count += 1, *(--s) = '0';
+
+    if ((count + 1) > sb->capacity)
+        return (count + 1) - sb->capacity;
+
+    sb->count = count;
+    sb->items[sb->count] = '\0';
+
+    /* copy from internal buffer to destination */
+    for (size_t j = base; j < count; j++)
+        sb->items[j] = *(s++);
+
+    return 0;
+}
+
+UMN_DEF int umn_sb_pushf(umn_sb_t *sb, const char *format, ...) __attribute__((format(printf, 2, 3)))
+{
+    int overflow = 0;
+    umn_format_t command = {0};
+
+    va_list args;
+    va_start(args, format);
+    
+    while ((format = umn_format_get(format, &command)))
+        overflow += umn_sb_push_format(sb, command, args);
+
+    va_end(args);
+
+    return overflow;
+}
+
+/* UMN SB & FORMAT -- END */
 
 #endif /* UMN_CORE_IMPLEMENTATION */
 #endif /* UMN_CORE_H */
