@@ -401,7 +401,7 @@ UMN_DEF void *umn_memalloc(size_t size)
 UMN_DEF void *umn_memrealloc(void *ptr, size_t size)
 {
     if (ptr == NULL)
-        return NULL;
+        return umn_memalloc(size);
 
     size = ((size + 7) >> 3) << 3; /* ((size + 7) / 8) * 8; */
     size += sizeof(size_t);        /* account for the allocation size and stuff ... */
