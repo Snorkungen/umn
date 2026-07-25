@@ -167,7 +167,6 @@ UMN_DEF void umn_printc(char c);                                                
 
 /* UMN SB & FORMAT -- END */
 
-#define UMN_CORE_IMPLEMENTATION
 #ifdef UMN_CORE_IMPLEMENTATION
 
 #ifndef UMN_CORE_NOLIBC
@@ -207,12 +206,12 @@ UMN_DEF inline long umn_strtol(const char *nptr, char **endptr, int base)
     return strtol(nptr, endptr, base);
 }
 
-static void umn_write_to_stdout(const char *message, const char *file, int line)
+static inline void umn_write_to_stdout(const char *message, const char *file, int line)
 {
     fputs(message, stdout);
 }
 
-static void umn_write_to_stderr(const char *message, const char *file, int line)
+static inline void umn_write_to_stderr(const char *message, const char *file, int line)
 {
     fputs(message, stderr);
 }
