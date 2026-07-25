@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>WASM C99 Demo</title>
+    <style>
+        html,
+        body {
+            background: #232323;
+            color: #fff;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Custom tempalloc Demo</h1>
+    <p>Counting tokens: <span id="result">Loading...</span></p>
+
+    <script>
+        async function run() {
+            const response = await fetch('./.build/umn.wasm');
+            const bytes = await response.arrayBuffer();
+            const { instance } = await WebAssembly.instantiate(bytes);
+            const exports = instance.exports;
+
+            // 1. Access Memory
+            const memory = new Uint8Array(exports.memory.buffer);
+
+            // 2. Prepare String
+            const jsString = "10|~0xa, food_for_taught";
+            const encoder = new TextEncoder();
+            const encoded = encoder.encode(jsString);
+
+            // 3. Allocate using our custom C function
+            // We allocate enough for the string + 1 (null terminator)
+            const ptr = exports.tempalloc(encoded.length + 1);
+            // 4. Write to WASM Memory at the returned pointer
+            memory.set(encoded, ptr);
+            memory[ptr + encoded.length] = 0; // Null terminate
+
+            const count = exports.count_tokens(ptr, encoded.length);
+            document.getElementById('result').textContent = `"${jsString}" contains ${count} tokens.`;
+        }
+
+        run().catch(console.error);
+    </script>
+</body>
+
+</html>
