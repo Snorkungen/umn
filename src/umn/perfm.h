@@ -1,7 +1,7 @@
 #ifndef UMN_PERFM_H
 #define UMN_PERFM_H
 
-#include "utils.h"
+#include "core.h"
 
 #ifdef __x86_64__
 #include <x86intrin.h>
@@ -127,7 +127,7 @@ void umn_perfm_report(umn_perfm_t *t)
 
     unsigned long long avg = t->avg.v;
 
-    printf("%s = %llu", name, avg);
+    umn_printf("%s = %llu", name, avg);
 
     // iterate over children
 
@@ -135,7 +135,7 @@ void umn_perfm_report(umn_perfm_t *t)
 
     for (umn_perfm_t *child = t->data.child; child; child = child->data.sibling)
     {
-        printf(", .%s = %llu %.0Lf%%",
+        umn_printf(", .%s = %llu %.0Lf%%",
                child->data.name,
                child->avg.v, (long double)child->avg.v / t->avg.v * 100);
 
@@ -144,7 +144,7 @@ void umn_perfm_report(umn_perfm_t *t)
 
     umn_perfm_reset(t);
 
-    putchar('\n');
+    umn_printc('\n');
 }
 
 /*

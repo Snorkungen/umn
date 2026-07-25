@@ -1,7 +1,7 @@
 /* Snorkungen 2026 umn for the next year */
 
 #define UMN_LEXER_IMPLEMENTATION
-#define UMN_UTILS_IMPLEMENTATION
+#define UMN_CORE_IMPLEMENTATION
 #define UMN_EXPR_IMPLEMENTATION
 #include "umn/expr.h"
 
@@ -143,7 +143,7 @@ umn_uint_t compute_node(const umn_Lexer *lexer, const umn_PToken *p, umn_Token *
     if (err_token && err_token->kind)
         return umn_uint(0);
 
-    assert(p);
+    umn_assert(p);
 
     umn_uint_t value = {0}, lvalue, rvalue;
     if (p->token.kind == UMN_KINTEGER)
@@ -273,8 +273,8 @@ int main(int argc, char **argv)
 
     umn_slab_free(ptokens, ptokens.items ? ptokens.items->items : NULL);
 
-    umn_free(NULL, (char *)config.lexer.data);
-    umn_free(NULL, computed_values.items);
+    umn_memfree((char *)config.lexer.data);
+    umn_memfree(computed_values.items);
 
     return 0;
 }

@@ -9,9 +9,7 @@
 /* umn_token_data(token)*/
 /* umn_token_flag(token)*/
 
-#include "./utils.h"
-
-#include <stdio.h> /* printf, puts */
+#include "./core.h"
 
 typedef enum
 {
@@ -522,26 +520,26 @@ void umn_token_print_(const umn_Lexer *lexer, const umn_Token *token)
   umn_token__kind_to_str(token, kind, sizeof(kind));
   umn_strncpy(value, lexer->data + token->begin, token->length);
 
-  printf("umn_Token { %s, .begin=%zu, .length=%d, value=\"%s\"}\n",
-         kind, token->begin, token->length, value);
+  umn_printf("umn_Token { %s, .begin=%zu, .length=%d, value=\"%s\"}\n",
+             kind, token->begin, token->length, value);
 }
 
-#define umn_token_print(lexer, token) printf("%s:%d", __FILE__, __LINE__), umn_token_print_(lexer, token)
+#define umn_token_print(lexer, token) umn_printf("%s:%d", __FILE__, __LINE__), umn_token_print_(lexer, token)
 
 void umn_token_print_error(const umn_Lexer *lexer, const umn_Token *token)
 {
   char buffer[512] = {0};
   umn_assert(sizeof(buffer) > ((token->begin - token->line_offset) + token->length));
 
-  puts(lexer->data + (token->begin - token->line_offset));
+  umn_prints(lexer->data + (token->begin - token->line_offset));
 
   for (size_t i = 0; i < token->line_offset; i++)
-    putchar(' ');
+    umn_printc(' ');
 
   for (size_t i = 0; i < token->length; i++)
-    putchar('^');
+    umn_printc('^');
 
-  putchar('\n');
+  umn_printc('\n');
 }
 
 #endif

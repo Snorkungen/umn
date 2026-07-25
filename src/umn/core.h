@@ -161,10 +161,13 @@ UMN_DEF int umn_sb_pushf(umn_sb_t *sb, const char *format, ...) __attribute__((f
 
 */
 
-// UMN_DEF int umn_sb_pushf(umn_sb_t *sb, const char *format, ...) __attribute__((format(printf, 2, 3)));
+UMN_DEF void umn_printf(const char *format, ...) __attribute__((format(printf, 1, 2))); /* Should behave apriximately as **printf** */
+UMN_DEF void umn_prints(const char *str);                                               /* Should behave apriximately as **puts** */
+UMN_DEF void umn_printc(char c);                                                        /* Should behave apriximately as **putchar** */
 
 /* UMN SB & FORMAT -- END */
 
+#define UMN_CORE_IMPLEMENTATION
 #ifdef UMN_CORE_IMPLEMENTATION
 
 #ifndef UMN_CORE_NOLIBC
@@ -815,10 +818,10 @@ UMN_DEF const char *umn_format(const char *fmt, umn_format_t *command)
 UMN_DEF const char *umn_format_cache(const char *fmt, umn_format_t *command, va_list args)
 {
     const char *begin = fmt;
-    fmt = umn_format(fmt, command);
 
-    if (command->modifier == 'l' && (command->modifier == 'c' || command->modifier == 's'))
-        goto fail_to_literal_output;
+    fmt = umn_format(fmt, command);
+    if (command->kind == 0 || fmt == NULL)
+        return fmt;
 
     if (command->width < 0)
         command->width = va_arg(args, int);
@@ -870,7 +873,7 @@ UMN_DEF int umn_sb_push_format(umn_sb_t *sb, umn_format_t command)
     value_sb.capacity = sizeof(value_buffer), value_sb.items = value_buffer;
     prefix_sb.capacity = sizeof(prefix_buffer), prefix_sb.items = prefix_buffer;
 
-    if (command.modifier == 'c')
+    if (command.conversion == 'c')
     {
         umn_assert(command.modifier != 'l');
 
@@ -1079,6 +1082,44 @@ UMN_DEF int umn_sb_pushf(umn_sb_t *sb, const char *format, ...)
     va_end(args);
 
     return overflow;
+}
+
+UMN_DEF void umn_printf(const char *format, ...)
+{
+    char internal_buffer[1024];
+    umn_sb_t sb = {.items = internal_buffer, .capacity = sizeof(internal_buffer)};
+    umn_format_t command = {0};
+
+    va_list args;
+    va_start(args, format);
+
+    while ((format = umn_format_cache(format, &command, args)))
+    {
+        if (umn_sb_push_format(&sb, command))
+        {
+            /* assume that sb_push* operations always include a null-terminator */
+            umn_write_to_stdout(sb.items, __FILE__, __LINE__);
+            sb.count = 0;
+            umn_assert(umn_sb_push_format(&sb, command) == 0);
+        }
+    }
+
+    va_end(args);
+
+    if (sb.count > 0)
+        umn_write_to_stdout(sb.items, __FILE__, __LINE__);
+}
+
+UMN_DEF void inline umn_prints(const char *str)
+{
+    umn_write_to_stdout(str, __FILE__, __LINE__);
+    umn_write_to_stdout("\n", __FILE__, __LINE__); /* implicitely append a newline */
+}
+
+UMN_DEF void inline umn_printc(char c)
+{
+    char str[2] = {c, 0};
+    umn_write_to_stdout(str, __FILE__, __LINE__);
 }
 
 /* UMN SB & FORMAT -- END */

@@ -1,6 +1,6 @@
 
 #define UMN_LEXER_IMPLEMENTATION
-#define UMN_UTILS_IMPLEMENTATION
+#define UMN_CORE_IMPLEMENTATION
 
 #include "umn/perfm.h"
 #include "umn/lexer.h"

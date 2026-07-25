@@ -1,7 +1,7 @@
 #ifndef UMN_EXPR_H
 #define UMN_EXPR_H
 
-#include "utils.h"
+#include "core.h"
 #include "lexer.h"
 
 /*
@@ -229,11 +229,11 @@ void umn_ptoken_tree_print(const umn_Lexer *lexer, const umn_PToken *ptoken)
 
         for (int i = 0; depth && i < (depth - 1); i++)
         {
-            printf((item.depth_map & (1 << i)) ? "│  " : "   ");
+            umn_printf((item.depth_map & (1 << i)) ? "│  " : "   ");
         }
         if (depth > 0)
         {
-            printf(item.is_last
+            umn_printf(item.is_last
                        ? "└──"
                        : "├──");
 
@@ -245,7 +245,7 @@ void umn_ptoken_tree_print(const umn_Lexer *lexer, const umn_PToken *ptoken)
         /* */
         if (item.ptoken == NULL)
         {
-            printf("(nil)\n");
+            umn_printf("(nil)\n");
             continue;
         }
         umn_token_print(lexer, &item.ptoken->token);

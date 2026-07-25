@@ -1,5 +1,5 @@
 #define UMN_LEXER_IMPLEMENTATION
-#define UMN_UTILS_IMPLEMENTATION
+#define UMN_CORE_IMPLEMENTATION
 #define UMN_EXPR_IMPLEMENTATION
 
 #include "umn/expr.h"
@@ -69,16 +69,16 @@ void test_1(umn_PToken_Allocator *ptokens, umn_Lexer *lexer)
 
         int64_t value = compute(lexer, res);
 
-        printf("%s = %ld\n",
+        umn_printf("%s = %ld\n",
                umn_ptoken_strncpy(lexer, res, cbuffer, sizeof(cbuffer)),
                value);
 
         if (value - tests[i].expected)
         {
-            puts(tests[i].str);
-            printf("\033[31m");
+            umn_prints(tests[i].str);
+            umn_printf("\033[31m");
             umn_ptoken_tree_print(lexer, res);
-            printf("\033[0m");
+            umn_printf("\033[0m");
             break;
         }
     }
@@ -122,7 +122,7 @@ int main(void)
     umn_PToken *ptoken;
 
     test_1(&ptokens, &lexer);
-    puts("--------------------------");
+    umn_prints("--------------------------");
     /* parse a function and do things ... */
 
     /* f(x) = 2 * x */
@@ -133,23 +133,23 @@ int main(void)
     ptoken = umn_expr_parse(&lexer, &ptokens, NULL, umn_expr_parse__func_value, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
 
-    puts("--------------------------");
+    umn_prints("--------------------------");
 
     lexer.position = 0;
     lexer.data = "+10 * +++(1 * 2) = +1 + x, 1 + 1";
     ptoken = umn_expr_parse(&lexer, &ptokens, NULL, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
     umn_ptoken_strncpy(&lexer, ptoken, cbuffer, sizeof(cbuffer));
-    puts(cbuffer);
+    umn_prints(cbuffer);
 
-    puts("--------------------------");
+    umn_prints("--------------------------");
 
     __SET_DATA("1 + -5!!");
 
     ptoken = umn_expr_parse(&lexer, &ptokens, NULL, NULL);
     umn_ptoken_tree_print(&lexer, ptoken);
     umn_ptoken_strncpy(&lexer, ptoken, cbuffer, sizeof(cbuffer));
-    puts(cbuffer);
+    umn_prints(cbuffer);
 
     return 0;
 }
