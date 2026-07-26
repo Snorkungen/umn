@@ -27,20 +27,33 @@
             // 1. Access Memory
             const memory = new Uint8Array(exports.memory.buffer);
 
-            // 2. Prepare String
-            const jsString = "10|~0xa, food_for_taught";
-            const encoder = new TextEncoder();
-            const encoded = encoder.encode(jsString);
+            function prepare_string(str, data) {
+                const encoder = new TextEncoder(), encoded = encoder.encode(str);
+                const ptr = exports.tempalloc(encoded.length + 1);
+                memory.set(encoded, ptr);
+                memory[ptr + encoded.length] = 0;
 
-            // 3. Allocate using our custom C function
-            // We allocate enough for the string + 1 (null terminator)
-            const ptr = exports.tempalloc(encoded.length + 1);
-            // 4. Write to WASM Memory at the returned pointer
-            memory.set(encoded, ptr);
-            memory[ptr + encoded.length] = 0; // Null terminate
+                ptr.encoded_lenght = encoded.length;
 
-            const count = exports.count_tokens(ptr, encoded.length);
+                return ptr;
+            }
+
+            const jsString = "10|~0xa, food_for_taught", ptr = prepare_string(jsString);
+            const count = exports.count_tokens(ptr, ptr.encoded_lenght);
             document.getElementById('result').textContent = `"${jsString}" contains ${count} tokens.`;
+
+            let tptr = prepare_string(" ~(0xf << 1)")
+            let rptr = exports.hex_encode(tptr);
+
+            let strlen = (initial) => { let count = 0; while (memory[(initial + count)] != 0) count++; return count };
+            const decoder = new TextDecoder();
+            console.log(strlen(rptr))
+
+            let s = decoder.decode(memory.slice(rptr, rptr + strlen(rptr)), {})
+
+            console.log(s)
+
+            exports.panic()
         }
 
         run().catch(console.error);
